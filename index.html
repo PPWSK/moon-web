@@ -166,7 +166,10 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 <div class="card">
   <h2>Connect</h2>
   <button id="btnConnect" class="btn-blue" onclick="doConnect()">Connect to MOON device</button>
-  <div id="connStatus" class="status">Not connected</div>
+  <div id="connStatus" class="fw-status">
+    <span class="fw-dot" id="connDot" style="background:#9D9D9D"></span>
+    <span id="connText">Not connected</span>
+  </div>
 </div>
 
 <div class="card">
@@ -220,8 +223,8 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 
 <div class="card">
   <h2>Log</h2>
-  <button style="width:auto;padding:4px 12px;font-size:0.65rem;margin-bottom:6px;border:1px solid #e0e0e0;background:transparent;color:#9D9D9D" onclick="copyLog()" id="btnCopyLog">Copy</button>
   <div id="log" class="log"></div>
+  <button style="width:auto;padding:4px 12px;font-size:0.65rem;margin-top:6px;border:1px solid #e0e0e0;background:transparent;color:#9D9D9D" onclick="copyLog()" id="btnCopyLog">Copy</button>
 </div>
 
 <div class="footer">
@@ -383,6 +386,13 @@ function log(msg) {
 
 function updateUI(id, text) { document.getElementById(id).textContent = text; }
 
+function setConnStatus(text, state) {
+  document.getElementById('connText').textContent = text;
+  const dot = document.getElementById('connDot');
+  const colors = { connected: '#030303', disconnected: '#9D9D9D', error: '#cc0000', pending: '#004AFF' };
+  dot.style.background = colors[state] || colors.disconnected;
+}
+
 function showPhase(text, cls) {
   const el = document.getElementById('phaseDisplay');
   el.style.display = '';
@@ -437,14 +447,14 @@ async function doConnect() {
       optionalServices: [NUS_SERVICE]
     });
     log(`Selected: ${device.name}`);
-    updateUI('connStatus', `Connecting to ${device.name}...`);
+    setConnStatus(`Connecting to ${device.name}...`, 'pending');
 
     isSkeleton = device.name && device.name.toUpperCase().includes('SKEL');
 
     device.addEventListener('gattserverdisconnected', () => {
       if (!probing) {
         log('Disconnected.');
-        updateUI('connStatus', 'Disconnected');
+        setConnStatus('Disconnected', 'disconnected');
       }
       running = false;
     });
@@ -454,10 +464,10 @@ async function doConnect() {
     await acquireNUS();
 
     if (isSkeleton) {
-      updateUI('connStatus', `Connected: ${device.name} (SKELETON)`);
+      setConnStatus(`Connected: ${device.name}`, 'connected');
       log('Skeleton detected. Safe to OTA — no WDT.');
     } else {
-      updateUI('connStatus', `Connected: ${device.name} (update needed)`);
+      setConnStatus(`Connected: ${device.name}`, 'connected');
       await prepDevice();
     }
 
@@ -465,7 +475,7 @@ async function doConnect() {
     checkReady();
   } catch (err) {
     log(`Connect error: ${err.message}`);
-    updateUI('connStatus', `Error: ${err.message}`);
+    setConnStatus(`Error: ${err.message}`, 'error');
   }
 }
 
@@ -531,11 +541,11 @@ async function connectToSkeleton() {
       optionalServices: [NUS_SERVICE]
     });
     log(`Selected: ${device.name}`);
-    updateUI('connStatus', `Connecting to ${device.name}...`);
+    setConnStatus(`Connecting to ${device.name}...`, 'pending');
 
     device.addEventListener('gattserverdisconnected', () => {
       log('Disconnected.');
-      updateUI('connStatus', 'Disconnected');
+      setConnStatus('Disconnected', 'disconnected');
       running = false;
     });
 
@@ -551,7 +561,7 @@ async function connectToSkeleton() {
       skelConnectResolve(true);
       skelConnectResolve = null;
     } else {
-      updateUI('connStatus', `Connected: ${device.name}`);
+      setConnStatus(`Connected: ${device.name}`, 'connected');
       showMode();
       checkReady();
     }
@@ -623,7 +633,7 @@ async function recoverState() {
     log('Disconnected. Press Connect to start again.');
     isSkeleton = false;
     rxChar = null;
-    updateUI('connStatus', 'Disconnected — ready for reconnect');
+    setConnStatus('Disconnected', 'disconnected');
     showMode();
     checkReady();
     return;
@@ -777,7 +787,7 @@ async function safeUpdate() {
     log('Update complete! Device rebooting into ' + FW_FULL_VERSION + '.');
     setTimeout(() => {
       hidePhase(); isSkeleton = false; rxChar = null;
-      updateUI('connStatus', 'Ready for next device');
+      setConnStatus('Ready for next device', 'disconnected');
       showMode(); checkReady();
     }, 5000);
   } else {
@@ -847,7 +857,7 @@ async function fullRescue() {
     return;
   }
 
-  updateUI('connStatus', `Reconnected: ${device.name} (update needed)`);
+  setConnStatus(`Connected: ${device.name}`, 'connected');
   await prepDevice();
 
   // --- Calculate optimal timing ---
@@ -920,7 +930,7 @@ async function fullRescue() {
     log('Could not read device name — proceeding anyway.');
   }
 
-  updateUI('connStatus', `Connected: ${device.name}`);
+  setConnStatus(`Connected: ${device.name}`, 'connected');
 
   // ==================== STAGE 2 ====================
   showStage(2);
@@ -949,7 +959,7 @@ async function fullRescue() {
     hidePhase();
     isSkeleton = false;
     rxChar = null;
-    updateUI('connStatus', 'Ready for next device');
+    setConnStatus('Ready for next device', 'disconnected');
     showMode();
     checkReady();
   }, 5000);
