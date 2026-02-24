@@ -3,107 +3,127 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MOON Lamp — Rescue OTA</title>
+<title>MOON Lamp — Firmware Update</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #1a1a2e; color: #eee;
-  padding: 16px; max-width: 520px; margin: 0 auto;
-  line-height: 1.5;
+  font-family: Helvetica, Arial, sans-serif;
+  background: #ffffff; color: #030303;
+  padding: 2rem 1rem; max-width: 520px; margin: 0 auto;
+  line-height: 1.6;
 }
-h1 { font-size: 22px; margin-bottom: 4px; color: #e0e0ff; }
-.subtitle { font-size: 13px; color: #666; margin-bottom: 16px; }
+h1 { font-size: 1.5rem; font-weight: 400; margin-bottom: 0.25rem; color: #030303; letter-spacing: 0.02em; }
+.subtitle { font-size: 0.8rem; color: #9D9D9D; margin-bottom: 2rem; letter-spacing: 0.01em; }
 .card {
-  background: #16213e; border-radius: 12px; padding: 16px; margin-bottom: 12px;
+  border-top: 1px solid #e0e0e0; padding: 1.25rem 0; margin-bottom: 0;
 }
+.card:last-child { border-bottom: 1px solid #e0e0e0; }
 .card h2 {
-  font-size: 13px; color: #888; margin-bottom: 8px;
-  text-transform: uppercase; letter-spacing: 1px;
+  font-size: 0.7rem; color: #9D9D9D; margin-bottom: 0.75rem;
+  text-transform: uppercase; letter-spacing: 0.1em; font-weight: 400;
 }
 button {
-  width: 100%; padding: 14px; border: none; border-radius: 8px;
-  font-size: 16px; font-weight: 600; cursor: pointer; margin-bottom: 8px;
-  transition: opacity 0.2s;
+  width: 100%; padding: 12px 2rem; border: 1px solid #030303;
+  background: transparent; color: #030303;
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 0.875rem; font-weight: 400; cursor: pointer; margin-bottom: 8px;
+  transition: border-color 0.2s, color 0.2s;
+  letter-spacing: 0.01em;
 }
-button:disabled { opacity: 0.4; cursor: not-allowed; }
-button:not(:disabled):hover { opacity: 0.85; }
-.btn-blue { background: #0f4c75; color: white; }
-.btn-green { background: #1b8a2e; color: white; }
-.btn-red { background: #8a1b1b; color: white; }
-.btn-orange { background: #b85c00; color: white; }
-.status { font-size: 13px; color: #aaa; margin-top: 6px; word-break: break-all; }
+button:disabled { opacity: 0.3; cursor: not-allowed; }
+button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
+.btn-blue { border-color: #030303; color: #030303; }
+.btn-green { border-color: #030303; color: #030303; }
+.btn-green:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
+.btn-red { border-color: #8a1b1b; color: #8a1b1b; }
+.btn-red:not(:disabled):hover { border-color: #030303; color: #030303; }
+.btn-orange { border-color: #030303; color: #030303; background: #030303; color: #ffffff; }
+.btn-orange:not(:disabled):hover { background: #004AFF; border-color: #004AFF; color: #ffffff; }
+.status { font-size: 0.8rem; color: #9D9D9D; margin-top: 6px; word-break: break-all; }
+
 .progress-bar {
-  width: 100%; height: 24px; background: #0a0a1a;
-  border-radius: 12px; overflow: hidden; margin: 8px 0;
+  width: 100%; height: 3px; background: #e0e0e0;
+  overflow: hidden; margin: 12px 0;
 }
 .progress-fill {
-  height: 100%; background: linear-gradient(90deg, #0f4c75, #3282b8);
+  height: 100%; background: #004AFF;
   transition: width 0.3s; display: flex; align-items: center;
-  justify-content: center; font-size: 12px; font-weight: 600; min-width: 40px;
+  justify-content: center; font-size: 0; min-width: 0;
 }
+.progress-text { font-size: 0.8rem; color: #9D9D9D; margin-bottom: 8px; }
+
 .log {
-  background: #0a0a1a; border-radius: 8px; padding: 10px;
-  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-  font-size: 11px; max-height: 250px; overflow-y: auto;
-  color: #7fba00; margin-top: 8px; white-space: pre-wrap;
+  background: #F8F8F8; padding: 12px;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 0.65rem; max-height: 200px; overflow-y: auto;
+  color: #555; margin-top: 8px; white-space: pre-wrap;
+  border: 1px solid #e0e0e0;
 }
-.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
-.stat { background: #0a0a1a; border-radius: 8px; padding: 8px; text-align: center; }
-.stat .val { font-size: 20px; font-weight: 700; color: #3282b8; }
-.stat .lbl { font-size: 11px; color: #666; }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 12px; background: #e0e0e0; }
+.stat { background: #ffffff; padding: 10px; text-align: center; }
+.stat .val { font-size: 1.25rem; font-weight: 400; color: #030303; }
+.stat .lbl { font-size: 0.65rem; color: #9D9D9D; text-transform: uppercase; letter-spacing: 0.08em; }
 .slider-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
-.slider-row input[type=range] { flex: 1; accent-color: #3282b8; }
-.slider-row .slider-val { font-size: 18px; font-weight: 700; color: #3282b8; min-width: 50px; text-align: center; }
-.info { font-size: 12px; color: #666; margin: 4px 0; }
-.phase-display { font-size: 28px; font-weight: 700; text-align: center; padding: 10px; }
-.phase-probe { color: #b85c00; }
-.phase-count { color: #3282b8; }
-.phase-go { color: #1b8a2e; }
+.slider-row input[type=range] { flex: 1; accent-color: #004AFF; }
+.slider-row .slider-val { font-size: 1rem; font-weight: 400; color: #030303; min-width: 50px; text-align: center; }
+.info { font-size: 0.75rem; color: #9D9D9D; margin: 4px 0; }
+.phase-display { font-size: 1.5rem; font-weight: 400; text-align: center; padding: 12px; letter-spacing: 0.02em; }
+.phase-probe { color: #9D9D9D; }
+.phase-count { color: #004AFF; }
+.phase-go { color: #030303; }
 .stage-label {
-  font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 1px; padding: 4px 8px; border-radius: 4px;
-  display: inline-block; margin-bottom: 6px;
+  font-size: 0.65rem; font-weight: 400; text-transform: uppercase;
+  letter-spacing: 0.1em; padding: 4px 10px;
+  display: inline-block; margin-bottom: 6px; border: 1px solid;
 }
-.stage-1 { background: #b85c00; color: white; }
-.stage-2 { background: #1b8a2e; color: white; }
+.stage-1 { border-color: #9D9D9D; color: #9D9D9D; }
+.stage-2 { border-color: #030303; color: #030303; }
 
 /* Platform warning */
 .platform-warning {
-  background: #3a1a1a; border: 1px solid #8a3333; border-radius: 12px;
-  padding: 20px; margin-bottom: 16px; text-align: center;
+  border: 1px solid #e0e0e0; padding: 2rem 1.5rem; margin-bottom: 1.5rem; text-align: center;
 }
-.platform-warning h2 { color: #ff6b6b; font-size: 18px; margin-bottom: 10px; text-transform: none; letter-spacing: normal; }
-.platform-warning p { font-size: 14px; color: #ccc; margin: 8px 0; }
-.platform-warning .detail { font-size: 12px; color: #999; margin-top: 12px; }
-.platform-warning a { color: #6ba3ff; }
+.platform-warning h2 { color: #030303; font-size: 1rem; font-weight: 400; margin-bottom: 0.75rem; text-transform: none; letter-spacing: 0.02em; }
+.platform-warning p { font-size: 0.85rem; color: #555; margin: 8px 0; line-height: 1.6; }
+.platform-warning .detail { font-size: 0.75rem; color: #9D9D9D; margin-top: 1rem; line-height: 1.6; }
+.platform-warning a { color: #004AFF; text-decoration: none; }
+.platform-warning a:hover { text-decoration: underline; }
 
 /* Instructions */
-.instructions { font-size: 13px; color: #bbb; }
-.instructions ol { padding-left: 20px; }
-.instructions li { margin: 6px 0; }
-.instructions .note { font-size: 12px; color: #888; font-style: italic; margin-top: 8px; }
+.instructions { font-size: 0.8rem; color: #555; }
+.instructions ol { padding-left: 1.25rem; }
+.instructions li { margin: 0.5rem 0; }
+.instructions .note { font-size: 0.75rem; color: #9D9D9D; font-style: italic; margin-top: 0.75rem; }
 
 /* Firmware status */
-.fw-status { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
-.fw-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.fw-dot.loading { background: #b85c00; }
-.fw-dot.ready { background: #1b8a2e; }
-.fw-dot.error { background: #8a1b1b; }
+.fw-status { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 0.8rem; color: #555; }
+.fw-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.fw-dot.loading { background: #9D9D9D; }
+.fw-dot.ready { background: #030303; }
+.fw-dot.error { background: #cc0000; }
 
 /* Collapsible */
 .collapse-toggle {
-  background: none; border: none; color: #888; font-size: 12px;
+  background: none; border: none; color: #9D9D9D; font-size: 0.75rem;
+  font-family: Helvetica, Arial, sans-serif;
   cursor: pointer; padding: 4px 0; width: auto; margin: 0; font-weight: 400;
-  text-align: left;
+  text-align: left; letter-spacing: 0.01em;
 }
-.collapse-toggle:hover { color: #aaa; }
+.collapse-toggle:hover { color: #004AFF; }
+
+/* Footer */
+.footer {
+  padding: 2rem 0 1rem; text-align: center;
+  font-size: 0.7rem; color: #9D9D9D; letter-spacing: 0.01em;
+}
+.footer a { color: #9D9D9D; text-decoration: none; }
+.footer a:hover { color: #004AFF; }
 </style>
 </head>
 <body>
 
-<h1>MOON Lamp Rescue</h1>
-<div class="subtitle">Firmware recovery for S18 devices stuck on v4.5.1</div>
+<h1>MOON Lamp &mdash; Firmware Update</h1>
+<div class="subtitle">Recovery tool for devices requiring a firmware update</div>
 
 <!-- Platform warning (shown/hidden by JS) -->
 <div id="platformWarning" class="platform-warning" style="display:none">
@@ -156,12 +176,12 @@ button:not(:disabled):hover { opacity: 0.85; }
     <button class="collapse-toggle" onclick="toggleCustomFw()" id="customFwToggle">+ Use custom firmware files</button>
     <div id="customFwPanel" style="display:none;margin-top:8px">
       <input type="file" id="skelInput" accept=".bin" style="display:none" onchange="loadSkel(event)">
-      <button class="btn-blue" style="font-size:13px;padding:10px" onclick="document.getElementById('skelInput').click()">Choose skeleton .bin</button>
-      <div id="skelStatus" class="status" style="font-size:11px"></div>
+      <button class="btn-blue" style="font-size:0.75rem;padding:8px" onclick="document.getElementById('skelInput').click()">Choose skeleton .bin</button>
+      <div id="skelStatus" class="status" style="font-size:0.7rem"></div>
 
       <input type="file" id="fullInput" accept=".bin" style="display:none" onchange="loadFull(event)">
-      <button class="btn-blue" style="font-size:13px;padding:10px" onclick="document.getElementById('fullInput').click()">Choose full firmware .bin</button>
-      <div id="fullStatus" class="status" style="font-size:11px"></div>
+      <button class="btn-blue" style="font-size:0.75rem;padding:8px" onclick="document.getElementById('fullInput').click()">Choose full firmware .bin</button>
+      <div id="fullStatus" class="status" style="font-size:0.7rem"></div>
     </div>
   </div>
 </div>
@@ -211,7 +231,8 @@ button:not(:disabled):hover { opacity: 0.85; }
   <div id="phaseDisplay" class="phase-display" style="display:none"></div>
 
   <button id="btnStop" class="btn-red" onclick="stopOTA()" disabled style="display:none">Stop</button>
-  <div class="progress-bar"><div id="progressFill" class="progress-fill" style="width:0%">0%</div></div>
+  <div id="progressText" class="progress-text" style="display:none">0%</div>
+  <div class="progress-bar"><div id="progressFill" class="progress-fill" style="width:0%"></div></div>
   <div class="stats">
     <div class="stat"><div id="statSpeed" class="val">-</div><div class="lbl">KB/s</div></div>
     <div class="stat"><div id="statEta" class="val">-</div><div class="lbl">ETA (s)</div></div>
@@ -222,16 +243,14 @@ button:not(:disabled):hover { opacity: 0.85; }
 
 <div class="card">
   <h2>Log</h2>
-  <button style="width:auto;padding:6px 12px;font-size:11px;margin-bottom:6px;background:#333;color:#aaa;border:none;border-radius:4px;cursor:pointer" onclick="document.getElementById('log').textContent=''">Clear</button>
+  <button style="width:auto;padding:4px 12px;font-size:0.65rem;margin-bottom:6px;border:1px solid #e0e0e0;background:transparent;color:#9D9D9D" onclick="document.getElementById('log').textContent=''">Clear</button>
   <div id="log" class="log"></div>
 </div>
 
-<div class="card" style="background:transparent;padding:8px;text-align:center">
-  <div style="font-size:11px;color:#444">
-    MOON Lamp Rescue &mdash; Web Bluetooth OTA
-    <br>Works on Android (Chrome), Windows (Chrome/Edge), Linux (Chrome), ChromeOS
-    <br>Does <strong>not</strong> work on macOS or iOS (Apple BLE limitation)
-  </div>
+<div class="footer">
+  <a href="https://www.adu-studios.com">A.D.U. Studios</a>
+  <br>Compatible with Android (Chrome), Windows (Chrome/Edge), Linux (Chrome), ChromeOS
+  <br>Questions? <a href="mailto:info@adu-studios.com">info@adu-studios.com</a>
 </div>
 
 </div><!-- /mainContent -->
@@ -253,19 +272,20 @@ function detectPlatform() {
     showPlatformWarning(
       'Not Available on iOS',
       'This rescue tool requires Web Bluetooth, which Apple does not support on iOS. No iOS browser (Safari, Chrome, or others) can perform this update.',
-      'Your options: use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If none are available, <a href="mailto:support@moonlamp.com">contact support</a> for mail-in repair.'
+      'Your options: use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If none are available, <a href="mailto:info@adu-studios.com">contact us</a> for mail-in repair.'
     );
     return false;
   }
 
-  if (isMacOS) {
-    showPlatformWarning(
-      'Not Available on macOS',
-      'This rescue requires Bluetooth write-without-response, which macOS blocks for this device. This is an Apple platform limitation that affects all macOS software (Chrome, native apps, Python, etc.).',
-      'Your options: use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If none are available, <a href="mailto:support@moonlamp.com">contact support</a> for mail-in repair.'
-    );
-    return false;
-  }
+  // macOS warning disabled for testing — re-enable before public release
+  // if (isMacOS) {
+  //   showPlatformWarning(
+  //     'Not Available on macOS',
+  //     'This rescue requires Bluetooth write-without-response, which macOS blocks for this device. This is an Apple platform limitation that affects all macOS software (Chrome, native apps, Python, etc.).',
+  //     'Your options: use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If none are available, <a href="mailto:info@adu-studios.com">contact us</a> for mail-in repair.'
+  //   );
+  //   return false;
+  // }
 
   if (!hasWebBluetooth) {
     document.getElementById('noBleWarning').style.display = '';
@@ -409,7 +429,8 @@ function hideStage() { document.getElementById('stageLabel').style.display = 'no
 
 function resetProgress() {
   document.getElementById('progressFill').style.width = '0%';
-  document.getElementById('progressFill').textContent = '0%';
+  document.getElementById('progressText').textContent = '0%';
+  document.getElementById('progressText').style.display = 'none';
   updateUI('statSent', '0');
   updateUI('statAcked', '0');
   updateUI('statSpeed', '-');
@@ -759,7 +780,8 @@ async function transferOTA(fw, noResponse, paceMs) {
     const remaining = (totalPackets - sent) / (sent / elapsed);
 
     document.getElementById('progressFill').style.width = pct + '%';
-    document.getElementById('progressFill').textContent = pct + '%';
+    document.getElementById('progressText').style.display = '';
+    document.getElementById('progressText').textContent = pct + '%';
     updateUI('statSent', sent);
     updateUI('statSpeed', speed.toFixed(1));
     updateUI('statEta', remaining.toFixed(0));
