@@ -123,7 +123,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 <body>
 
 <h1>MOON Lamp &mdash; Firmware Update</h1>
-<div class="subtitle">Recovery tool for devices requiring a firmware update</div>
+<div class="subtitle">Wireless firmware update for your MOON lamp</div>
 
 <!-- Platform warning (shown/hidden by JS) -->
 <div id="platformWarning" class="platform-warning" style="display:none">
@@ -148,7 +148,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
     <ol>
       <li><strong>Turn on</strong> your MOON lamp and wait for it to boot (~5s)</li>
       <li>Tap <strong>Connect</strong> below and select your MOON device</li>
-      <li>Tap <strong>Start Full Rescue</strong> &mdash; the page handles everything automatically</li>
+      <li>Tap <strong>Start Update</strong> &mdash; the page handles everything automatically</li>
       <li>Your MOON reboots with updated firmware</li>
     </ol>
     <div class="note">The rescue stage is time-sensitive. Keep your phone/computer close to the lamp and don't switch apps during transfer.</div>
@@ -157,26 +157,9 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 
 <div class="card">
   <h2>Firmware</h2>
-  <div id="fwSkelStatus" class="fw-status">
-    <span class="fw-dot loading" id="fwSkelDot"></span>
-    <span id="fwSkelText">Loading rescue module...</span>
-  </div>
-  <div id="fwFullStatus" class="fw-status">
-    <span class="fw-dot loading" id="fwFullDot"></span>
-    <span id="fwFullText">Loading firmware...</span>
-  </div>
-
-  <div style="margin-top:10px">
-    <button class="collapse-toggle" onclick="toggleCustomFw()" id="customFwToggle">+ Use custom firmware files</button>
-    <div id="customFwPanel" style="display:none;margin-top:8px">
-      <input type="file" id="skelInput" accept=".bin" style="display:none" onchange="loadSkel(event)">
-      <button class="btn-blue" style="font-size:0.75rem;padding:8px" onclick="document.getElementById('skelInput').click()">Choose skeleton .bin</button>
-      <div id="skelStatus" class="status" style="font-size:0.7rem"></div>
-
-      <input type="file" id="fullInput" accept=".bin" style="display:none" onchange="loadFull(event)">
-      <button class="btn-blue" style="font-size:0.75rem;padding:8px" onclick="document.getElementById('fullInput').click()">Choose full firmware .bin</button>
-      <div id="fullStatus" class="status" style="font-size:0.7rem"></div>
-    </div>
+  <div id="fwStatus" class="fw-status">
+    <span class="fw-dot loading" id="fwDot"></span>
+    <span id="fwText">Loading...</span>
   </div>
 </div>
 
@@ -200,8 +183,8 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
       </div>
       <div class="info">Packet pacing delay. Lower = faster but riskier. Default 12ms is well-tested.</div>
     </div>
-    <div class="info" style="margin-top:8px">Rescue: probes WDT timing, flashes skeleton, then full firmware. Fully automatic.</div>
-    <button id="btnRescue" class="btn-orange" onclick="fullRescue()" disabled>Start Full Rescue</button>
+    <div class="info" style="margin-top:8px">The update runs automatically and takes about 2 minutes.</div>
+    <button id="btnRescue" class="btn-orange" onclick="fullRescue()" disabled>Start Update</button>
   </div>
 
   <!-- Safe mode (skeleton devices) -->
@@ -265,8 +248,8 @@ function detectPlatform() {
   if (isIOS) {
     showPlatformWarning(
       'Not Available on iOS',
-      'This rescue tool requires Web Bluetooth, which Apple does not support on iOS. No iOS browser (Safari, Chrome, or others) can perform this update.',
-      'Your options: use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If none are available, <a href="mailto:info@adu-studios.com">contact us</a> for mail-in repair.'
+      'This update tool requires Web Bluetooth, which is not available on iOS. No iOS browser (Safari, Chrome, or others) supports this feature.',
+      'Please use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If you need help, reach out to <a href="mailto:info@adu-studios.com">info@adu-studios.com</a>.'
     );
     return false;
   }
@@ -275,8 +258,8 @@ function detectPlatform() {
   // if (isMacOS) {
   //   showPlatformWarning(
   //     'Not Available on macOS',
-  //     'This rescue requires Bluetooth write-without-response, which macOS blocks for this device. This is an Apple platform limitation that affects all macOS software (Chrome, native apps, Python, etc.).',
-  //     'Your options: use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If none are available, <a href="mailto:info@adu-studios.com">contact us</a> for mail-in repair.'
+  //     'This update requires a Bluetooth feature that macOS does not support. This is a platform limitation that affects all macOS software.',
+  //     'Please use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If you need help, reach out to <a href="mailto:info@adu-studios.com">info@adu-studios.com</a>.'
   //   );
   //   return false;
   // }
@@ -308,7 +291,7 @@ const NUS_TX      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
 const FW_SKELETON_URL = 'firmware/skeleton.bin';
 const FW_FULL_URL     = 'firmware/moon_s18.bin';
-const FW_FULL_VERSION = 'v4.7.2';
+const FW_FULL_VERSION = 'v4.8.0';
 
 // ============================================================
 //  State
@@ -330,40 +313,31 @@ let isSkeleton = false;
 //  Auto-fetch firmware
 // ============================================================
 
-async function fetchFirmware(url, label, dotId, textId) {
-  const dot = document.getElementById(dotId);
-  const text = document.getElementById(textId);
-  try {
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const buf = await resp.arrayBuffer();
-    const fw = new Uint8Array(buf);
-    dot.className = 'fw-dot ready';
-    const sizeKB = (fw.byteLength / 1024).toFixed(0);
-    text.textContent = `${label}: ready (${sizeKB} KB)`;
-    log(`Loaded ${label}: ${sizeKB} KB`);
-    return fw;
-  } catch (err) {
-    dot.className = 'fw-dot error';
-    text.textContent = `${label}: failed to load (${err.message})`;
-    log(`Failed to load ${label}: ${err.message}`);
-    return null;
-  }
+async function fetchFirmwareBin(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const buf = await resp.arrayBuffer();
+  return new Uint8Array(buf);
 }
 
 async function loadBundledFirmware() {
-  log('Downloading firmware files...');
-  const [skel, full] = await Promise.all([
-    fetchFirmware(FW_SKELETON_URL, 'Rescue module', 'fwSkelDot', 'fwSkelText'),
-    fetchFirmware(FW_FULL_URL, 'Firmware ' + FW_FULL_VERSION, 'fwFullDot', 'fwFullText'),
-  ]);
-  if (skel) {
+  const dot = document.getElementById('fwDot');
+  const text = document.getElementById('fwText');
+  try {
+    log('Downloading firmware...');
+    const [skel, full] = await Promise.all([
+      fetchFirmwareBin(FW_SKELETON_URL),
+      fetchFirmwareBin(FW_FULL_URL),
+    ]);
     skeletonFw = skel;
-    document.getElementById('fwSkelText').textContent = 'Rescue module: ready';
-  }
-  if (full) {
     fullFw = full;
-    document.getElementById('fwFullText').textContent = `Firmware: ${FW_FULL_VERSION}`;
+    dot.className = 'fw-dot ready';
+    text.textContent = FW_FULL_VERSION;
+    log(`Firmware ${FW_FULL_VERSION} ready.`);
+  } catch (err) {
+    dot.className = 'fw-dot error';
+    text.textContent = `Failed to load (${err.message})`;
+    log(`Firmware download failed: ${err.message}`);
   }
   checkReady();
 }
@@ -371,18 +345,6 @@ async function loadBundledFirmware() {
 // ============================================================
 //  UI helpers
 // ============================================================
-
-function toggleCustomFw() {
-  const panel = document.getElementById('customFwPanel');
-  const btn = document.getElementById('customFwToggle');
-  if (panel.style.display === 'none') {
-    panel.style.display = '';
-    btn.textContent = '- Hide custom firmware files';
-  } else {
-    panel.style.display = 'none';
-    btn.textContent = '+ Use custom firmware files';
-  }
-}
 
 function toggleAdvanced() {
   const panel = document.getElementById('advPanel');
@@ -486,7 +448,7 @@ async function doConnect() {
       updateUI('connStatus', `Connected: ${device.name} (SKELETON)`);
       log('Skeleton detected. Safe to OTA — no WDT.');
     } else {
-      updateUI('connStatus', `Connected: ${device.name} (RESCUE)`);
+      updateUI('connStatus', `Connected: ${device.name} (update needed)`);
       await prepDevice();
     }
 
@@ -536,40 +498,6 @@ function onNotify(event) {
       log('Device confirmed OTA complete!');
     }
   } catch (e) {}
-}
-
-// ============================================================
-//  File loading (custom firmware override)
-// ============================================================
-
-function loadSkel(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    skeletonFw = new Uint8Array(reader.result);
-    log(`Custom skeleton: ${file.name} (${(skeletonFw.length / 1024).toFixed(1)} KB)`);
-    updateUI('skelStatus', `${file.name} — ${(skeletonFw.length / 1024).toFixed(1)} KB`);
-    document.getElementById('fwSkelDot').className = 'fw-dot ready';
-    document.getElementById('fwSkelText').textContent = `Skeleton: ${(skeletonFw.length / 1024).toFixed(0)} KB (custom)`;
-    checkReady();
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-function loadFull(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    fullFw = new Uint8Array(reader.result);
-    log(`Custom firmware: ${file.name} (${(fullFw.length / 1024).toFixed(1)} KB)`);
-    updateUI('fullStatus', `${file.name} — ${(fullFw.length / 1024).toFixed(1)} KB`);
-    document.getElementById('fwFullDot').className = 'fw-dot ready';
-    document.getElementById('fwFullText').textContent = `Full firmware: ${(fullFw.length / 1024).toFixed(0)} KB (custom)`;
-    checkReady();
-  };
-  reader.readAsArrayBuffer(file);
 }
 
 // ============================================================
@@ -700,7 +628,7 @@ async function recoverState() {
       log('Device is on SKELETON. You can retry stage 2.');
       isSkeleton = true;
     } else {
-      log('Device is on v4.5.1. You can retry full rescue.');
+      log('Device is on v4.5.1. You can retry the update.');
       isSkeleton = false;
     }
   } else {
@@ -718,7 +646,7 @@ async function recoverState() {
     txChar.removeEventListener('characteristicvaluechanged', handler);
 
     if (gotResponse) {
-      log('Got response — device is on v4.5.1. You can retry full rescue.');
+      log('Got response — device is on v4.5.1. You can retry the update.');
       isSkeleton = false;
     } else {
       log('No response — device is on SKELETON. You can retry stage 2.');
@@ -836,8 +764,8 @@ async function safeUpdate() {
   const paceMs = parseInt(document.getElementById('safePaceSlider').value);
   const ok = await transferOTA(fullFw, true, paceMs);
   if (ok) {
-    showPhase('COMPLETE!', 'phase-go');
-    log('OTA complete! Device rebooting into new firmware.');
+    showPhase('Update complete', 'phase-go');
+    log('Update complete! Device rebooting into ' + FW_FULL_VERSION + '.');
     setTimeout(() => {
       hidePhase(); isSkeleton = false; rxChar = null;
       updateUI('connStatus', 'Ready for next device');
@@ -910,7 +838,7 @@ async function fullRescue() {
     return;
   }
 
-  updateUI('connStatus', `Reconnected: ${device.name} (RESCUE)`);
+  updateUI('connStatus', `Reconnected: ${device.name} (update needed)`);
   await prepDevice();
 
   // --- Calculate optimal timing ---
@@ -946,7 +874,7 @@ async function fullRescue() {
 
   const ok1 = await transferOTA(skeletonFw, true, paceMs);
   if (!ok1) {
-    log('Stage 1 transfer failed!');
+    log('Transfer interrupted. Please try again.');
     await recoverState();
     return;
   }
@@ -995,17 +923,17 @@ async function fullRescue() {
 
   const ok2 = await transferOTA(fullFw, true, paceMs);
   if (!ok2) {
-    log('Stage 2 failed! Device is on skeleton — safe to retry.');
+    log('Transfer interrupted — safe to retry.');
     await recoverState();
     return;
   }
 
   // ==================== DONE ====================
   hideStage();
-  showPhase('RESCUE COMPLETE!', 'phase-go');
+  showPhase('Update complete', 'phase-go');
   log('====================================');
-  log('  RESCUE COMPLETE!');
-  log('  Device rebooting into new firmware');
+  log('  Update complete!');
+  log('  Device rebooting into ' + FW_FULL_VERSION);
   log('====================================');
 
   setTimeout(() => {
