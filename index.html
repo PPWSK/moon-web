@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MOON Lamp — Rescue OTA</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1a1a2e; color: #eee;
+  padding: 16px; max-width: 520px; margin: 0 auto;
+  line-height: 1.5;
+}
+h1 { font-size: 22px; margin-bottom: 4px; color: #e0e0ff; }
+.subtitle { font-size: 13px; color: #666; margin-bottom: 16px; }
+.card {
+  background: #16213e; border-radius: 12px; padding: 16px; margin-bottom: 12px;
+}
+.card h2 {
+  font-size: 13px; color: #888; margin-bottom: 8px;
+  text-transform: uppercase; letter-spacing: 1px;
+}
+button {
+  width: 100%; padding: 14px; border: none; border-radius: 8px;
+  font-size: 16px; font-weight: 600; cursor: pointer; margin-bottom: 8px;
+  transition: opacity 0.2s;
+}
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:not(:disabled):hover { opacity: 0.85; }
+.btn-blue { background: #0f4c75; color: white; }
+.btn-green { background: #1b8a2e; color: white; }
+.btn-red { background: #8a1b1b; color: white; }
+.btn-orange { background: #b85c00; color: white; }
+.status { font-size: 13px; color: #aaa; margin-top: 6px; word-break: break-all; }
+.progress-bar {
+  width: 100%; height: 24px; background: #0a0a1a;
+  border-radius: 12px; overflow: hidden; margin: 8px 0;
+}
+.progress-fill {
+  height: 100%; background: linear-gradient(90deg, #0f4c75, #3282b8);
+  transition: width 0.3s; display: flex; align-items: center;
+  justify-content: center; font-size: 12px; font-weight: 600; min-width: 40px;
+}
+.log {
+  background: #0a0a1a; border-radius: 8px; padding: 10px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px; max-height: 250px; overflow-y: auto;
+  color: #7fba00; margin-top: 8px; white-space: pre-wrap;
+}
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.stat { background: #0a0a1a; border-radius: 8px; padding: 8px; text-align: center; }
+.stat .val { font-size: 20px; font-weight: 700; color: #3282b8; }
+.stat .lbl { font-size: 11px; color: #666; }
+.slider-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.slider-row input[type=range] { flex: 1; accent-color: #3282b8; }
+.slider-row .slider-val { font-size: 18px; font-weight: 700; color: #3282b8; min-width: 50px; text-align: center; }
+.info { font-size: 12px; color: #666; margin: 4px 0; }
+.phase-display { font-size: 28px; font-weight: 700; text-align: center; padding: 10px; }
+.phase-probe { color: #b85c00; }
+.phase-count { color: #3282b8; }
+.phase-go { color: #1b8a2e; }
+.stage-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1px; padding: 4px 8px; border-radius: 4px;
+  display: inline-block; margin-bottom: 6px;
+}
+.stage-1 { background: #b85c00; color: white; }
+.stage-2 { background: #1b8a2e; color: white; }
+
+/* Platform warning */
+.platform-warning {
+  background: #3a1a1a; border: 1px solid #8a3333; border-radius: 12px;
+  padding: 20px; margin-bottom: 16px; text-align: center;
+}
+.platform-warning h2 { color: #ff6b6b; font-size: 18px; margin-bottom: 10px; text-transform: none; letter-spacing: normal; }
+.platform-warning p { font-size: 14px; color: #ccc; margin: 8px 0; }
+.platform-warning .detail { font-size: 12px; color: #999; margin-top: 12px; }
+.platform-warning a { color: #6ba3ff; }
+
+/* Instructions */
+.instructions { font-size: 13px; color: #bbb; }
+.instructions ol { padding-left: 20px; }
+.instructions li { margin: 6px 0; }
+.instructions .note { font-size: 12px; color: #888; font-style: italic; margin-top: 8px; }
+
+/* Firmware status */
+.fw-status { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+.fw-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.fw-dot.loading { background: #b85c00; }
+.fw-dot.ready { background: #1b8a2e; }
+.fw-dot.error { background: #8a1b1b; }
+
+/* Collapsible */
+.collapse-toggle {
+  background: none; border: none; color: #888; font-size: 12px;
+  cursor: pointer; padding: 4px 0; width: auto; margin: 0; font-weight: 400;
+  text-align: left;
+}
+.collapse-toggle:hover { color: #aaa; }
+</style>
+</head>
+<body>
+
+<h1>MOON Lamp Rescue</h1>
+<div class="subtitle">Firmware recovery for S18 devices stuck on v4.5.1</div>
+
+<!-- Platform warning (shown/hidden by JS) -->
+<div id="platformWarning" class="platform-warning" style="display:none">
+  <h2 id="warnTitle">Unsupported Platform</h2>
+  <p id="warnBody"></p>
+  <div class="detail" id="warnDetail"></div>
+</div>
+
+<!-- No Web Bluetooth warning -->
+<div id="noBleWarning" class="platform-warning" style="display:none">
+  <h2>Web Bluetooth Not Available</h2>
+  <p>This browser doesn't support Web Bluetooth.</p>
+  <div class="detail">Use <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on Android, Windows, Linux, or ChromeOS.</div>
+</div>
+
+<!-- Main content (hidden on unsupported platforms) -->
+<div id="mainContent">
+
+<div class="card">
+  <h2>How It Works</h2>
+  <div class="instructions">
+    <ol>
+      <li><strong>Turn on</strong> your MOON lamp and wait for it to boot (~5s)</li>
+      <li>Tap <strong>Connect</strong> below and select your MOON device</li>
+      <li>Tap <strong>Start Full Rescue</strong> &mdash; the page handles everything automatically:
+        <ul style="list-style:disc;padding-left:16px;margin-top:4px">
+          <li>Probes the device timing</li>
+          <li>Transfers a small rescue firmware</li>
+          <li>Reconnects and transfers the full firmware</li>
+        </ul>
+      </li>
+      <li>Your MOON reboots with updated firmware</li>
+    </ol>
+    <div class="note">The rescue stage is time-sensitive. Keep your phone/computer close to the lamp and don't switch apps during transfer.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Firmware</h2>
+  <div id="fwSkelStatus" class="fw-status">
+    <span class="fw-dot loading" id="fwSkelDot"></span>
+    <span id="fwSkelText">Loading skeleton firmware...</span>
+  </div>
+  <div id="fwFullStatus" class="fw-status">
+    <span class="fw-dot loading" id="fwFullDot"></span>
+    <span id="fwFullText">Loading full firmware...</span>
+  </div>
+
+  <div style="margin-top:10px">
+    <button class="collapse-toggle" onclick="toggleCustomFw()" id="customFwToggle">+ Use custom firmware files</button>
+    <div id="customFwPanel" style="display:none;margin-top:8px">
+      <input type="file" id="skelInput" accept=".bin" style="display:none" onchange="loadSkel(event)">
+      <button class="btn-blue" style="font-size:13px;padding:10px" onclick="document.getElementById('skelInput').click()">Choose skeleton .bin</button>
+      <div id="skelStatus" class="status" style="font-size:11px"></div>
+
+      <input type="file" id="fullInput" accept=".bin" style="display:none" onchange="loadFull(event)">
+      <button class="btn-blue" style="font-size:13px;padding:10px" onclick="document.getElementById('fullInput').click()">Choose full firmware .bin</button>
+      <div id="fullStatus" class="status" style="font-size:11px"></div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>1. Connect</h2>
+  <button id="btnConnect" class="btn-blue" onclick="doConnect()">Connect to MOON device</button>
+  <div id="connStatus" class="status">Not connected</div>
+</div>
+
+<div class="card">
+  <h2>2. Transfer</h2>
+
+  <!-- Rescue mode (v4.5.1 devices) -->
+  <div id="rescueControls" style="display:none">
+    <button class="collapse-toggle" onclick="toggleAdvanced()" id="advToggle">+ Advanced settings</button>
+    <div id="advPanel" style="display:none">
+      <div class="slider-row">
+        <span style="font-size:12px;color:#888">Pacing:</span>
+        <input type="range" id="paceSlider" min="5" max="25" value="12" oninput="updatePaceLabel()">
+        <span id="paceLabel" class="slider-val">12ms</span>
+      </div>
+      <div class="info">Packet pacing delay. Lower = faster but riskier. Default 12ms is well-tested.</div>
+    </div>
+    <div class="info" style="margin-top:8px">Rescue: probes WDT timing, flashes skeleton, then full firmware. Fully automatic.</div>
+    <button id="btnRescue" class="btn-orange" onclick="fullRescue()" disabled>Start Full Rescue</button>
+  </div>
+
+  <!-- Safe mode (skeleton devices) -->
+  <div id="safeControls" style="display:none">
+    <div class="info">Skeleton detected &mdash; safe transfer, no time pressure.</div>
+    <div class="slider-row">
+      <span style="font-size:12px;color:#888">Pacing:</span>
+      <input type="range" id="safePaceSlider" min="5" max="25" value="12" oninput="updateSafePaceLabel()">
+      <span id="safePaceLabel" class="slider-val">12ms</span>
+    </div>
+    <button id="btnSafe" class="btn-green" onclick="safeUpdate()" disabled>Start OTA</button>
+  </div>
+
+  <!-- Between-stages reconnect -->
+  <div id="skelConnectBox" style="display:none">
+    <div class="info" style="color:#b85c00;font-size:13px;margin-bottom:8px">Stage 1 complete! Tap below to connect to the skeleton device.</div>
+    <button id="btnSkelConnect" class="btn-green" onclick="connectToSkeleton()">Connect to MOON (SKEL)</button>
+  </div>
+
+  <div id="stageLabel" style="display:none"></div>
+  <div id="phaseDisplay" class="phase-display" style="display:none"></div>
+
+  <button id="btnStop" class="btn-red" onclick="stopOTA()" disabled style="display:none">Stop</button>
+  <div class="progress-bar"><div id="progressFill" class="progress-fill" style="width:0%">0%</div></div>
+  <div class="stats">
+    <div class="stat"><div id="statSpeed" class="val">-</div><div class="lbl">KB/s</div></div>
+    <div class="stat"><div id="statEta" class="val">-</div><div class="lbl">ETA (s)</div></div>
+    <div class="stat"><div id="statSent" class="val">0</div><div class="lbl">Packets</div></div>
+    <div class="stat"><div id="statAcked" class="val">0</div><div class="lbl">ACKed</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Log</h2>
+  <button style="width:auto;padding:6px 12px;font-size:11px;margin-bottom:6px;background:#333;color:#aaa;border:none;border-radius:4px;cursor:pointer" onclick="document.getElementById('log').textContent=''">Clear</button>
+  <div id="log" class="log"></div>
+</div>
+
+<div class="card" style="background:transparent;padding:8px;text-align:center">
+  <div style="font-size:11px;color:#444">
+    MOON Lamp Rescue &mdash; Web Bluetooth OTA
+    <br>Works on Android (Chrome), Windows (Chrome/Edge), Linux (Chrome), ChromeOS
+    <br>Does <strong>not</strong> work on macOS or iOS (Apple BLE limitation)
+  </div>
+</div>
+
+</div><!-- /mainContent -->
+
+<script>
+// ============================================================
+//  Platform detection
+// ============================================================
+
+function detectPlatform() {
+  const ua = navigator.userAgent;
+  const platform = navigator.platform || '';
+
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isMacOS = /Macintosh|MacIntel/.test(ua) && !isIOS;
+  const hasWebBluetooth = !!navigator.bluetooth;
+
+  if (isIOS) {
+    showPlatformWarning(
+      'Not Available on iOS',
+      'This rescue tool requires Web Bluetooth, which Apple does not support on iOS. No iOS browser (Safari, Chrome, or others) can perform this update.',
+      'Your options: use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If none are available, <a href="mailto:support@moonlamp.com">contact support</a> for mail-in repair.'
+    );
+    return false;
+  }
+
+  if (isMacOS) {
+    showPlatformWarning(
+      'Not Available on macOS',
+      'This rescue requires Bluetooth write-without-response, which macOS blocks for this device. This is an Apple platform limitation that affects all macOS software (Chrome, native apps, Python, etc.).',
+      'Your options: use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If none are available, <a href="mailto:support@moonlamp.com">contact support</a> for mail-in repair.'
+    );
+    return false;
+  }
+
+  if (!hasWebBluetooth) {
+    document.getElementById('noBleWarning').style.display = '';
+    document.getElementById('mainContent').style.display = 'none';
+    return false;
+  }
+
+  return true;
+}
+
+function showPlatformWarning(title, body, detail) {
+  document.getElementById('warnTitle').textContent = title;
+  document.getElementById('warnBody').innerHTML = body;
+  document.getElementById('warnDetail').innerHTML = detail;
+  document.getElementById('platformWarning').style.display = '';
+  document.getElementById('mainContent').style.display = 'none';
+}
+
+// ============================================================
+//  Constants
+// ============================================================
+
+const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_RX      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_TX      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+const FW_SKELETON_URL = 'firmware/skeleton.bin';
+const FW_FULL_URL     = 'firmware/moon_s18.bin';
+
+// ============================================================
+//  State
+// ============================================================
+
+let device = null;
+let server = null;
+let rxChar = null;
+let txChar = null;
+let skeletonFw = null;
+let fullFw = null;
+let running = false;
+let probing = false;
+let ackedCount = 0;
+let lastAckedN = -1;
+let isSkeleton = false;
+
+// ============================================================
+//  Auto-fetch firmware
+// ============================================================
+
+async function fetchFirmware(url, label, dotId, textId) {
+  const dot = document.getElementById(dotId);
+  const text = document.getElementById(textId);
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const buf = await resp.arrayBuffer();
+    const fw = new Uint8Array(buf);
+    dot.className = 'fw-dot ready';
+    text.textContent = `${label}: ${(fw.byteLength / 1024).toFixed(0)} KB`;
+    log(`Loaded ${label}: ${(fw.byteLength / 1024).toFixed(1)} KB`);
+    return fw;
+  } catch (err) {
+    dot.className = 'fw-dot error';
+    text.textContent = `${label}: failed to load (${err.message})`;
+    log(`Failed to load ${label}: ${err.message}`);
+    return null;
+  }
+}
+
+async function loadBundledFirmware() {
+  log('Downloading firmware files...');
+  const [skel, full] = await Promise.all([
+    fetchFirmware(FW_SKELETON_URL, 'Skeleton', 'fwSkelDot', 'fwSkelText'),
+    fetchFirmware(FW_FULL_URL, 'Full firmware', 'fwFullDot', 'fwFullText'),
+  ]);
+  if (skel) skeletonFw = skel;
+  if (full) fullFw = full;
+  checkReady();
+}
+
+// ============================================================
+//  UI helpers
+// ============================================================
+
+function toggleCustomFw() {
+  const panel = document.getElementById('customFwPanel');
+  const btn = document.getElementById('customFwToggle');
+  if (panel.style.display === 'none') {
+    panel.style.display = '';
+    btn.textContent = '- Hide custom firmware files';
+  } else {
+    panel.style.display = 'none';
+    btn.textContent = '+ Use custom firmware files';
+  }
+}
+
+function toggleAdvanced() {
+  const panel = document.getElementById('advPanel');
+  const btn = document.getElementById('advToggle');
+  if (panel.style.display === 'none') {
+    panel.style.display = '';
+    btn.textContent = '- Hide advanced settings';
+  } else {
+    panel.style.display = 'none';
+    btn.textContent = '+ Advanced settings';
+  }
+}
+
+function updatePaceLabel() {
+  document.getElementById('paceLabel').textContent = document.getElementById('paceSlider').value + 'ms';
+}
+function updateSafePaceLabel() {
+  document.getElementById('safePaceLabel').textContent = document.getElementById('safePaceSlider').value + 'ms';
+}
+
+function log(msg) {
+  const el = document.getElementById('log');
+  const ts = new Date().toLocaleTimeString();
+  el.textContent += `[${ts}] ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function updateUI(id, text) { document.getElementById(id).textContent = text; }
+
+function showPhase(text, cls) {
+  const el = document.getElementById('phaseDisplay');
+  el.style.display = '';
+  el.className = 'phase-display ' + cls;
+  el.textContent = text;
+}
+
+function hidePhase() { document.getElementById('phaseDisplay').style.display = 'none'; }
+
+function showStage(num) {
+  const el = document.getElementById('stageLabel');
+  el.style.display = '';
+  el.innerHTML = `<span class="stage-label stage-${num}">Stage ${num} of 2</span>`;
+}
+
+function hideStage() { document.getElementById('stageLabel').style.display = 'none'; }
+
+function resetProgress() {
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('progressFill').textContent = '0%';
+  updateUI('statSent', '0');
+  updateUI('statAcked', '0');
+  updateUI('statSpeed', '-');
+  updateUI('statEta', '-');
+}
+
+function showMode() {
+  document.getElementById('rescueControls').style.display = isSkeleton ? 'none' : '';
+  document.getElementById('safeControls').style.display = isSkeleton ? '' : 'none';
+}
+
+function checkReady() {
+  if (isSkeleton) {
+    document.getElementById('btnSafe').disabled = !(rxChar && fullFw);
+  } else {
+    document.getElementById('btnRescue').disabled = !(rxChar && skeletonFw && fullFw);
+  }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ============================================================
+//  BLE connection
+// ============================================================
+
+async function doConnect() {
+  try {
+    log('Requesting BLE device...');
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'MOON' }],
+      optionalServices: [NUS_SERVICE]
+    });
+    log(`Selected: ${device.name}`);
+    updateUI('connStatus', `Connecting to ${device.name}...`);
+
+    isSkeleton = device.name && device.name.toUpperCase().includes('SKEL');
+
+    device.addEventListener('gattserverdisconnected', () => {
+      if (!probing) {
+        log('Disconnected.');
+        updateUI('connStatus', 'Disconnected');
+      }
+      running = false;
+    });
+
+    server = await device.gatt.connect();
+    log('GATT connected');
+    await acquireNUS();
+
+    if (isSkeleton) {
+      updateUI('connStatus', `Connected: ${device.name} (SKELETON)`);
+      log('Skeleton detected. Safe to OTA — no WDT.');
+    } else {
+      updateUI('connStatus', `Connected: ${device.name} (RESCUE)`);
+      await prepDevice();
+    }
+
+    showMode();
+    checkReady();
+  } catch (err) {
+    log(`Connect error: ${err.message}`);
+    updateUI('connStatus', `Error: ${err.message}`);
+  }
+}
+
+async function acquireNUS() {
+  const service = await server.getPrimaryService(NUS_SERVICE);
+  rxChar = await service.getCharacteristic(NUS_RX);
+  txChar = await service.getCharacteristic(NUS_TX);
+  await txChar.startNotifications();
+  txChar.addEventListener('characteristicvaluechanged', onNotify);
+  log('NUS ready.');
+}
+
+async function prepDevice() {
+  await sendJSON({day_brightness: 0, night_brightness: 0, update_image: true});
+  await sendJSON({algo_disable: true});
+  log('Device prepped (brightness=0, algo disabled).');
+}
+
+async function sendJSON(obj) {
+  const data = new TextEncoder().encode(JSON.stringify(obj));
+  await rxChar.writeValueWithResponse(data);
+  await sleep(300);
+}
+
+function onNotify(event) {
+  const raw = new Uint8Array(event.target.value.buffer);
+  const text = new TextDecoder().decode(raw);
+  try {
+    if (text.includes('"ota":"ok"')) {
+      const m = text.match(/"n":(\d+)/);
+      if (m) {
+        lastAckedN = parseInt(m[1]);
+        ackedCount = lastAckedN + 1;
+        updateUI('statAcked', ackedCount);
+      }
+    } else if (text.includes('"ota":"error"')) {
+      log(`Device error: ${text}`);
+    } else if (text.includes('"ota":"done"')) {
+      log('Device confirmed OTA complete!');
+    }
+  } catch (e) {}
+}
+
+// ============================================================
+//  File loading (custom firmware override)
+// ============================================================
+
+function loadSkel(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    skeletonFw = new Uint8Array(reader.result);
+    log(`Custom skeleton: ${file.name} (${(skeletonFw.length / 1024).toFixed(1)} KB)`);
+    updateUI('skelStatus', `${file.name} — ${(skeletonFw.length / 1024).toFixed(1)} KB`);
+    document.getElementById('fwSkelDot').className = 'fw-dot ready';
+    document.getElementById('fwSkelText').textContent = `Skeleton: ${(skeletonFw.length / 1024).toFixed(0)} KB (custom)`;
+    checkReady();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function loadFull(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    fullFw = new Uint8Array(reader.result);
+    log(`Custom firmware: ${file.name} (${(fullFw.length / 1024).toFixed(1)} KB)`);
+    updateUI('fullStatus', `${file.name} — ${(fullFw.length / 1024).toFixed(1)} KB`);
+    document.getElementById('fwFullDot').className = 'fw-dot ready';
+    document.getElementById('fwFullText').textContent = `Full firmware: ${(fullFw.length / 1024).toFixed(0)} KB (custom)`;
+    checkReady();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ============================================================
+//  Skeleton connect (fresh BLE scan after stage 1)
+// ============================================================
+
+let skelConnectResolve = null;
+
+function promptSkelConnect() {
+  return new Promise(resolve => {
+    skelConnectResolve = resolve;
+    document.getElementById('skelConnectBox').style.display = '';
+  });
+}
+
+async function connectToSkeleton() {
+  const btn = document.getElementById('btnSkelConnect');
+  btn.disabled = true;
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'MOON' }],
+      optionalServices: [NUS_SERVICE]
+    });
+    log(`Selected: ${device.name}`);
+    updateUI('connStatus', `Connecting to ${device.name}...`);
+
+    device.addEventListener('gattserverdisconnected', () => {
+      log('Disconnected.');
+      updateUI('connStatus', 'Disconnected');
+      running = false;
+    });
+
+    server = await device.gatt.connect();
+    log('GATT connected');
+    await acquireNUS();
+
+    document.getElementById('skelConnectBox').style.display = 'none';
+
+    isSkeleton = device.name && device.name.toUpperCase().includes('SKEL');
+
+    if (skelConnectResolve) {
+      skelConnectResolve(true);
+      skelConnectResolve = null;
+    } else {
+      updateUI('connStatus', `Connected: ${device.name}`);
+      showMode();
+      checkReady();
+    }
+  } catch (err) {
+    log(`Connect error: ${err.message}`);
+    btn.disabled = false;
+    if (skelConnectResolve) {
+      skelConnectResolve(false);
+      skelConnectResolve = null;
+    }
+  }
+}
+
+// ============================================================
+//  Reconnect helpers
+// ============================================================
+
+async function waitForDisconnect(timeoutMs) {
+  const start = performance.now();
+  while (server && server.connected) {
+    if (performance.now() - start > timeoutMs) return false;
+    await sleep(200);
+  }
+  return true;
+}
+
+async function autoReconnect(waitS, maxRetries) {
+  for (let i = waitS; i > 0; i--) {
+    showPhase(`Reboot wait: ${i}s`, 'phase-probe');
+    await sleep(1000);
+  }
+  showPhase('Connecting...', 'phase-count');
+  log('Auto-reconnecting...');
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      server = await device.gatt.connect();
+      await acquireNUS();
+      log(`Reconnected (attempt ${attempt}).`);
+      return true;
+    } catch (err) {
+      log(`Reconnect ${attempt}/${maxRetries}: ${err.message}`);
+      await sleep(2000);
+    }
+  }
+  return false;
+}
+
+async function readDeviceName() {
+  try {
+    const gap = await server.getPrimaryService('generic_access');
+    const nameChar = await gap.getCharacteristic('gap.device_name');
+    const val = await nameChar.readValue();
+    return new TextDecoder().decode(val);
+  } catch (err) {
+    log(`Could not read device name: ${err.message}`);
+    return null;
+  }
+}
+
+// ============================================================
+//  Failure recovery
+// ============================================================
+
+async function recoverState() {
+  hidePhase();
+  hideStage();
+
+  if (!server || !server.connected) {
+    log('Disconnected. Press Connect to start again.');
+    isSkeleton = false;
+    rxChar = null;
+    updateUI('connStatus', 'Disconnected — ready for reconnect');
+    showMode();
+    checkReady();
+    return;
+  }
+
+  log('Detecting current firmware...');
+  const name = await readDeviceName();
+  if (name) {
+    log(`Device name: "${name}"`);
+    if (name.toUpperCase().includes('SKEL')) {
+      log('Device is on SKELETON. You can retry stage 2.');
+      isSkeleton = true;
+    } else {
+      log('Device is on v4.5.1. You can retry full rescue.');
+      isSkeleton = false;
+    }
+  } else {
+    log('Could not read name. Probing with get_info...');
+    let gotResponse = false;
+    const handler = (event) => {
+      const text = new TextDecoder().decode(new Uint8Array(event.target.value.buffer));
+      if (text.length > 5) gotResponse = true;
+    };
+    txChar.addEventListener('characteristicvaluechanged', handler);
+    try {
+      await rxChar.writeValueWithResponse(new TextEncoder().encode('{"get_info":true}'));
+    } catch (e) {}
+    await sleep(2000);
+    txChar.removeEventListener('characteristicvaluechanged', handler);
+
+    if (gotResponse) {
+      log('Got response — device is on v4.5.1. You can retry full rescue.');
+      isSkeleton = false;
+    } else {
+      log('No response — device is on SKELETON. You can retry stage 2.');
+      isSkeleton = true;
+    }
+  }
+
+  showMode();
+  checkReady();
+}
+
+// ============================================================
+//  OTA transfer (core engine)
+// ============================================================
+
+async function transferOTA(fw, noResponse, paceMs) {
+  running = true;
+  ackedCount = 0;
+  lastAckedN = -1;
+  resetProgress();
+
+  document.getElementById('btnStop').style.display = '';
+  document.getElementById('btnStop').disabled = false;
+
+  const PAYLOAD_SIZE = 509;
+  const totalPackets = Math.ceil(fw.length / PAYLOAD_SIZE);
+  const startTime = performance.now();
+  let completed = false;
+
+  log(`OTA: ${totalPackets} pkts, ${noResponse ? 'no-resp ' + paceMs + 'ms' : 'with-resp'}, ${(fw.length / 1024).toFixed(1)} KB`);
+
+  for (let i = 0; i < totalPackets; i++) {
+    if (!running) { log('Stopped by user.'); break; }
+    if (!server || !server.connected) { log('Connection lost!'); break; }
+
+    const start = i * PAYLOAD_SIZE;
+    const end = Math.min(start + PAYLOAD_SIZE, fw.length);
+    const chunk = fw.slice(start, end);
+    const packet = new Uint8Array(3 + chunk.length);
+    packet[0] = 0x4F;
+    packet[1] = (i >> 8) & 0xFF;
+    packet[2] = i & 0xFF;
+    packet.set(chunk, 3);
+
+    try {
+      if (noResponse) {
+        await rxChar.writeValueWithoutResponse(packet);
+        if (paceMs > 0) await sleep(paceMs);
+      } else {
+        await rxChar.writeValueWithResponse(packet);
+      }
+    } catch (err) {
+      log(`Write error pkt ${i}: ${err.message}`);
+      break;
+    }
+
+    const sent = i + 1;
+    const elapsed = (performance.now() - startTime) / 1000;
+    const speed = (sent * PAYLOAD_SIZE / 1024) / elapsed;
+    const pct = (sent / totalPackets * 100).toFixed(0);
+    const remaining = (totalPackets - sent) / (sent / elapsed);
+
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressFill').textContent = pct + '%';
+    updateUI('statSent', sent);
+    updateUI('statSpeed', speed.toFixed(1));
+    updateUI('statEta', remaining.toFixed(0));
+
+    if (sent % 50 === 0 || sent === totalPackets) {
+      log(`${sent}/${totalPackets} (${pct}%) ${speed.toFixed(1)} KB/s`);
+    }
+
+    if (sent === totalPackets) completed = true;
+  }
+
+  // Finalize
+  if (completed && server && server.connected) {
+    const fin = new Uint8Array(3);
+    fin[0] = 0x4F;
+    fin[1] = (totalPackets >> 8) & 0xFF;
+    fin[2] = totalPackets & 0xFF;
+    try {
+      if (noResponse) {
+        await rxChar.writeValueWithoutResponse(fin);
+      } else {
+        await rxChar.writeValueWithResponse(fin);
+      }
+      log('Finalize sent.');
+    } catch (err) {
+      log(`Finalize err (may be OK): ${err.message}`);
+    }
+  }
+
+  const totalTime = ((performance.now() - startTime) / 1000).toFixed(1);
+  log(`Transfer: ${totalTime}s. ${completed ? 'OK' : 'INCOMPLETE'}`);
+
+  running = false;
+  document.getElementById('btnStop').style.display = 'none';
+  return completed;
+}
+
+function stopOTA() {
+  running = false;
+  log('Stopping...');
+}
+
+// ============================================================
+//  Safe mode: OTA full firmware to skeleton device
+// ============================================================
+
+async function safeUpdate() {
+  document.getElementById('safeControls').style.display = 'none';
+  log('========== OTA: Full firmware ==========');
+  const paceMs = parseInt(document.getElementById('safePaceSlider').value);
+  const ok = await transferOTA(fullFw, true, paceMs);
+  if (ok) {
+    showPhase('COMPLETE!', 'phase-go');
+    log('OTA complete! Device rebooting into new firmware.');
+    setTimeout(() => {
+      hidePhase(); isSkeleton = false; rxChar = null;
+      updateUI('connStatus', 'Ready for next device');
+      showMode(); checkReady();
+    }, 5000);
+  } else {
+    log('OTA failed.');
+    await recoverState();
+  }
+  hideStage();
+}
+
+// ============================================================
+//  Full rescue: probe + skeleton + reconnect + full firmware
+// ============================================================
+
+async function fullRescue() {
+  document.getElementById('rescueControls').style.display = 'none';
+  const paceMs = parseInt(document.getElementById('paceSlider').value);
+
+  // ==================== STAGE 1 ====================
+  showStage(1);
+  log('============================');
+  log('  STAGE 1: Skeleton OTA');
+  log('============================');
+
+  // --- Probe WDT timing ---
+  probing = true;
+  showPhase('Probing WDT...', 'phase-probe');
+  log('Sending probe packet to measure WDT timing...');
+
+  const probeChunk = skeletonFw.slice(0, Math.min(509, skeletonFw.length));
+  const probe = new Uint8Array(3 + probeChunk.length);
+  probe[0] = 0x4F;
+  probe[1] = 0;
+  probe[2] = 0;
+  probe.set(probeChunk, 3);
+
+  const probeStart = performance.now();
+  try {
+    await rxChar.writeValueWithResponse(probe);
+  } catch (err) {
+    log(`Probe write failed: ${err.message}`);
+    probing = false; hidePhase(); hideStage(); showMode(); checkReady();
+    return;
+  }
+
+  log('Probe sent. Waiting for WDT crash (10-25s)...');
+
+  await new Promise(resolve => {
+    const check = setInterval(() => {
+      const el = ((performance.now() - probeStart) / 1000).toFixed(1);
+      showPhase(`Probing... ${el}s`, 'phase-probe');
+      if (!server || !server.connected) { clearInterval(check); resolve(); }
+    }, 200);
+    setTimeout(() => { clearInterval(check); resolve(); }, 30000);
+  });
+
+  const crashTime = performance.now();
+  const crashSec = (crashTime - probeStart) / 1000;
+  probing = false;
+
+  log(`WDT crash after ${crashSec.toFixed(1)}s.`);
+
+  // --- Reconnect after probe ---
+  log('Reconnecting after probe...');
+  if (!await autoReconnect(6, 10)) {
+    log('Reconnect failed! Refresh page and retry.');
+    hidePhase(); hideStage();
+    return;
+  }
+
+  updateUI('connStatus', `Reconnected: ${device.name} (RESCUE)`);
+  await prepDevice();
+
+  // --- Calculate optimal timing ---
+  const BOOT_DELAY = 3.0;
+  const estimatedBootMs = crashTime + BOOT_DELAY * 1000;
+  const TARGET_PHASE = 5.5;
+  const ALGO_PERIOD = 15;
+
+  const timeSinceBoot = (performance.now() - estimatedBootMs) / 1000;
+  const currentPhase = ((timeSinceBoot % ALGO_PERIOD) + ALGO_PERIOD) % ALGO_PERIOD;
+
+  let delay;
+  if (currentPhase <= TARGET_PHASE) delay = TARGET_PHASE - currentPhase;
+  else delay = ALGO_PERIOD - currentPhase + TARGET_PHASE;
+  if (delay < 1.5) delay += ALGO_PERIOD;
+
+  log(`Boot ~${timeSinceBoot.toFixed(1)}s ago. Phase: ${currentPhase.toFixed(1)}s. Waiting ${delay.toFixed(1)}s...`);
+
+  // --- Countdown ---
+  const launchAt = performance.now() + delay * 1000;
+  while (performance.now() < launchAt) {
+    const rem = ((launchAt - performance.now()) / 1000).toFixed(1);
+    showPhase(`Stage 1 in ${rem}s`, 'phase-count');
+    if (!server || !server.connected) {
+      log('Connection lost!'); hidePhase(); hideStage(); showMode(); checkReady(); return;
+    }
+    await sleep(100);
+  }
+
+  // --- Transfer skeleton ---
+  showPhase('Stage 1: Skeleton...', 'phase-count');
+  log('GO! Transferring skeleton...');
+
+  const ok1 = await transferOTA(skeletonFw, true, paceMs);
+  if (!ok1) {
+    log('Stage 1 transfer failed!');
+    await recoverState();
+    return;
+  }
+
+  // --- Wait for skeleton boot, then connect ---
+  log('Waiting for device to reboot into skeleton...');
+  showPhase('Stage 1 done!', 'phase-go');
+  await waitForDisconnect(15000);
+
+  hidePhase();
+  log('Tap the button below to connect to MOON (SKEL)...');
+
+  const skelConnected = await promptSkelConnect();
+  if (!skelConnected) {
+    log('Could not connect to skeleton.');
+    await recoverState();
+    return;
+  }
+
+  // Verify skeleton
+  showPhase('Verifying...', 'phase-count');
+  log('Checking device name...');
+
+  const name = await readDeviceName();
+  if (name) {
+    log(`Device name: "${name}"`);
+    if (!name.toUpperCase().includes('SKEL')) {
+      log(`Device is "${name}" — not skeleton! Stage 1 may have failed.`);
+      await recoverState();
+      return;
+    }
+    log('Skeleton confirmed!');
+  } else {
+    log('Could not read device name — proceeding anyway.');
+  }
+
+  updateUI('connStatus', `Connected: ${device.name}`);
+
+  // ==================== STAGE 2 ====================
+  showStage(2);
+  log('============================');
+  log('  STAGE 2: Full Firmware');
+  log('============================');
+
+  showPhase('Stage 2: Full firmware...', 'phase-count');
+
+  const ok2 = await transferOTA(fullFw, true, paceMs);
+  if (!ok2) {
+    log('Stage 2 failed! Device is on skeleton — safe to retry.');
+    await recoverState();
+    return;
+  }
+
+  // ==================== DONE ====================
+  hideStage();
+  showPhase('RESCUE COMPLETE!', 'phase-go');
+  log('====================================');
+  log('  RESCUE COMPLETE!');
+  log('  Device rebooting into new firmware');
+  log('====================================');
+
+  setTimeout(() => {
+    hidePhase();
+    isSkeleton = false;
+    rxChar = null;
+    updateUI('connStatus', 'Ready for next device');
+    showMode();
+    checkReady();
+  }, 5000);
+}
+
+// ============================================================
+//  Init
+// ============================================================
+
+if (detectPlatform()) {
+  loadBundledFirmware();
+}
+</script>
+</body>
+</html>
