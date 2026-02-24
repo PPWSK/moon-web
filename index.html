@@ -220,7 +220,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 
 <div class="card">
   <h2>Log</h2>
-  <button style="width:auto;padding:4px 12px;font-size:0.65rem;margin-bottom:6px;border:1px solid #e0e0e0;background:transparent;color:#9D9D9D" onclick="document.getElementById('log').textContent=''">Clear</button>
+  <button style="width:auto;padding:4px 12px;font-size:0.65rem;margin-bottom:6px;border:1px solid #e0e0e0;background:transparent;color:#9D9D9D" onclick="copyLog()" id="btnCopyLog">Copy</button>
   <div id="log" class="log"></div>
 </div>
 
@@ -345,6 +345,15 @@ async function loadBundledFirmware() {
 // ============================================================
 //  UI helpers
 // ============================================================
+
+function copyLog() {
+  const text = document.getElementById('log').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('btnCopyLog');
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  });
+}
 
 function toggleAdvanced() {
   const panel = document.getElementById('advPanel');
