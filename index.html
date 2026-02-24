@@ -148,13 +148,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
     <ol>
       <li><strong>Turn on</strong> your MOON lamp and wait for it to boot (~5s)</li>
       <li>Tap <strong>Connect</strong> below and select your MOON device</li>
-      <li>Tap <strong>Start Full Rescue</strong> &mdash; the page handles everything automatically:
-        <ul style="list-style:disc;padding-left:16px;margin-top:4px">
-          <li>Probes the device timing</li>
-          <li>Transfers a small rescue firmware</li>
-          <li>Reconnects and transfers the full firmware</li>
-        </ul>
-      </li>
+      <li>Tap <strong>Start Full Rescue</strong> &mdash; the page handles everything automatically</li>
       <li>Your MOON reboots with updated firmware</li>
     </ol>
     <div class="note">The rescue stage is time-sensitive. Keep your phone/computer close to the lamp and don't switch apps during transfer.</div>
@@ -165,11 +159,11 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
   <h2>Firmware</h2>
   <div id="fwSkelStatus" class="fw-status">
     <span class="fw-dot loading" id="fwSkelDot"></span>
-    <span id="fwSkelText">Loading skeleton firmware...</span>
+    <span id="fwSkelText">Loading rescue module...</span>
   </div>
   <div id="fwFullStatus" class="fw-status">
     <span class="fw-dot loading" id="fwFullDot"></span>
-    <span id="fwFullText">Loading full firmware...</span>
+    <span id="fwFullText">Loading firmware...</span>
   </div>
 
   <div style="margin-top:10px">
@@ -314,6 +308,7 @@ const NUS_TX      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
 const FW_SKELETON_URL = 'firmware/skeleton.bin';
 const FW_FULL_URL     = 'firmware/moon_s18.bin';
+const FW_FULL_VERSION = 'v4.7.2';
 
 // ============================================================
 //  State
@@ -344,8 +339,9 @@ async function fetchFirmware(url, label, dotId, textId) {
     const buf = await resp.arrayBuffer();
     const fw = new Uint8Array(buf);
     dot.className = 'fw-dot ready';
-    text.textContent = `${label}: ${(fw.byteLength / 1024).toFixed(0)} KB`;
-    log(`Loaded ${label}: ${(fw.byteLength / 1024).toFixed(1)} KB`);
+    const sizeKB = (fw.byteLength / 1024).toFixed(0);
+    text.textContent = `${label}: ready (${sizeKB} KB)`;
+    log(`Loaded ${label}: ${sizeKB} KB`);
     return fw;
   } catch (err) {
     dot.className = 'fw-dot error';
@@ -358,11 +354,17 @@ async function fetchFirmware(url, label, dotId, textId) {
 async function loadBundledFirmware() {
   log('Downloading firmware files...');
   const [skel, full] = await Promise.all([
-    fetchFirmware(FW_SKELETON_URL, 'Skeleton', 'fwSkelDot', 'fwSkelText'),
-    fetchFirmware(FW_FULL_URL, 'Full firmware', 'fwFullDot', 'fwFullText'),
+    fetchFirmware(FW_SKELETON_URL, 'Rescue module', 'fwSkelDot', 'fwSkelText'),
+    fetchFirmware(FW_FULL_URL, 'Firmware ' + FW_FULL_VERSION, 'fwFullDot', 'fwFullText'),
   ]);
-  if (skel) skeletonFw = skel;
-  if (full) fullFw = full;
+  if (skel) {
+    skeletonFw = skel;
+    document.getElementById('fwSkelText').textContent = 'Rescue module: ready';
+  }
+  if (full) {
+    fullFw = full;
+    document.getElementById('fwFullText').textContent = `Firmware: ${FW_FULL_VERSION}`;
+  }
   checkReady();
 }
 
