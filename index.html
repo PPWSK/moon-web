@@ -156,14 +156,6 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 </div>
 
 <div class="card">
-  <h2>Firmware</h2>
-  <div id="fwStatus" class="fw-status">
-    <span class="fw-dot loading" id="fwDot"></span>
-    <span id="fwText">Loading...</span>
-  </div>
-</div>
-
-<div class="card">
   <h2>Connect</h2>
   <button id="btnConnect" class="btn-blue" onclick="doConnect()">Connect to MOON device</button>
   <div id="connStatus" class="fw-status">
@@ -181,10 +173,10 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
     <div id="advPanel" style="display:none">
       <div class="slider-row">
         <span style="font-size:12px;color:#888">Pacing:</span>
-        <input type="range" id="paceSlider" min="5" max="25" value="12" oninput="updatePaceLabel()">
-        <span id="paceLabel" class="slider-val">12ms</span>
+        <input type="range" id="paceSlider" min="5" max="25" value="9" oninput="updatePaceLabel()">
+        <span id="paceLabel" class="slider-val">9ms</span>
       </div>
-      <div class="info">Packet pacing delay. Lower = faster but riskier. Default 12ms is well-tested.</div>
+      <div class="info">Packet pacing delay. Lower = faster but riskier. Default 9ms.</div>
     </div>
     <div class="info" style="margin-top:8px">The update runs automatically and takes about 2 minutes.</div>
     <button id="btnRescue" class="btn-orange" onclick="fullRescue()" disabled>Start Update</button>
@@ -195,8 +187,8 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
     <div class="info">Skeleton detected &mdash; safe transfer, no time pressure.</div>
     <div class="slider-row">
       <span style="font-size:12px;color:#888">Pacing:</span>
-      <input type="range" id="safePaceSlider" min="5" max="25" value="12" oninput="updateSafePaceLabel()">
-      <span id="safePaceLabel" class="slider-val">12ms</span>
+      <input type="range" id="safePaceSlider" min="5" max="25" value="9" oninput="updateSafePaceLabel()">
+      <span id="safePaceLabel" class="slider-val">9ms</span>
     </div>
     <button id="btnSafe" class="btn-green" onclick="safeUpdate()" disabled>Start OTA</button>
   </div>
@@ -324,8 +316,6 @@ async function fetchFirmwareBin(url) {
 }
 
 async function loadBundledFirmware() {
-  const dot = document.getElementById('fwDot');
-  const text = document.getElementById('fwText');
   try {
     log('Downloading firmware...');
     const [skel, full] = await Promise.all([
@@ -334,12 +324,8 @@ async function loadBundledFirmware() {
     ]);
     skeletonFw = skel;
     fullFw = full;
-    dot.className = 'fw-dot ready';
-    text.textContent = FW_FULL_VERSION;
     log(`Firmware ${FW_FULL_VERSION} ready.`);
   } catch (err) {
-    dot.className = 'fw-dot error';
-    text.textContent = `Failed to load (${err.message})`;
     log(`Firmware download failed: ${err.message}`);
   }
   checkReady();
@@ -467,7 +453,13 @@ async function doConnect() {
       setConnStatus(`Connected: ${device.name}`, 'connected');
       log('Skeleton detected. Safe to OTA — no WDT.');
     } else {
-      setConnStatus(`Connected: ${device.name}`, 'connected');
+      const ver = await queryDeviceVersion();
+      if (ver) {
+        setConnStatus(`Connected: ${device.name} — firmware ${ver}`, 'connected');
+        log(`Device firmware: ${ver}`);
+      } else {
+        setConnStatus(`Connected: ${device.name}`, 'connected');
+      }
       await prepDevice();
     }
 
@@ -486,6 +478,31 @@ async function acquireNUS() {
   await txChar.startNotifications();
   txChar.addEventListener('characteristicvaluechanged', onNotify);
   log('NUS ready.');
+}
+
+async function queryDeviceVersion() {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const handler = (event) => {
+      const text = new TextDecoder().decode(new Uint8Array(event.target.value.buffer));
+      try {
+        const obj = JSON.parse(text);
+        if (obj.fw_version) {
+          resolved = true;
+          txChar.removeEventListener('characteristicvaluechanged', handler);
+          resolve(obj.fw_version);
+        }
+      } catch (e) {}
+    };
+    txChar.addEventListener('characteristicvaluechanged', handler);
+    rxChar.writeValueWithResponse(new TextEncoder().encode('{"get_info":true}')).catch(() => {});
+    setTimeout(() => {
+      if (!resolved) {
+        txChar.removeEventListener('characteristicvaluechanged', handler);
+        resolve(null);
+      }
+    }, 3000);
+  });
 }
 
 async function prepDevice() {
@@ -710,17 +727,34 @@ async function transferOTA(fw, noResponse, paceMs) {
     packet[2] = i & 0xFF;
     packet.set(chunk, 3);
 
-    try {
-      if (noResponse) {
-        await rxChar.writeValueWithoutResponse(packet);
-        if (paceMs > 0) await sleep(paceMs);
-      } else {
-        await rxChar.writeValueWithResponse(packet);
+    let writeOk = false;
+    if (noResponse) {
+      // Retry on buffer full — matches Flutter app: 20ms intervals, 2s timeout
+      const deadline = performance.now() + 2000;
+      while (true) {
+        try {
+          await rxChar.writeValueWithoutResponse(packet);
+          writeOk = true;
+          break;
+        } catch (err) {
+          if (performance.now() < deadline) {
+            await sleep(20);
+            continue;
+          }
+          log(`Write failed pkt ${i}: ${err.message}`);
+          break;
+        }
       }
-    } catch (err) {
-      log(`Write error pkt ${i}: ${err.message}`);
-      break;
+      if (writeOk && paceMs > 0) await sleep(paceMs);
+    } else {
+      try {
+        await rxChar.writeValueWithResponse(packet);
+        writeOk = true;
+      } catch (err) {
+        log(`Write failed pkt ${i}: ${err.message}`);
+      }
     }
+    if (!writeOk) break;
 
     const sent = i + 1;
     const elapsed = (performance.now() - startTime) / 1000;
@@ -781,7 +815,8 @@ async function safeUpdate() {
   document.getElementById('safeControls').style.display = 'none';
   log('========== OTA: Full firmware ==========');
   const paceMs = parseInt(document.getElementById('safePaceSlider').value);
-  const ok = await transferOTA(fullFw, true, paceMs);
+  // Skeleton has no WDT — write-with-response is safe and reliable
+  const ok = await transferOTA(fullFw, false, paceMs);
   if (ok) {
     showPhase('Update complete', 'phase-go');
     log('Update complete! Device rebooting into ' + FW_FULL_VERSION + '.');
@@ -893,8 +928,17 @@ async function fullRescue() {
 
   const ok1 = await transferOTA(skeletonFw, true, paceMs);
   if (!ok1) {
-    log('Transfer interrupted. Please try again.');
-    await recoverState();
+    log('Transfer interrupted. Device is still on original firmware.');
+    log('Press Connect to try again.');
+    hidePhase();
+    hideStage();
+    // Device crashed back to v4.5.1 — do NOT run recoverState() which
+    // can falsely detect skeleton (device is rebooting, won't answer probes)
+    isSkeleton = false;
+    rxChar = null;
+    setConnStatus('Disconnected', 'disconnected');
+    showMode();
+    checkReady();
     return;
   }
 
@@ -940,7 +984,8 @@ async function fullRescue() {
 
   showPhase('Stage 2: Full firmware...', 'phase-count');
 
-  const ok2 = await transferOTA(fullFw, true, paceMs);
+  // Stage 2: write-with-response (matching Flutter app — reliable, no time pressure)
+  const ok2 = await transferOTA(fullFw, false, paceMs);
   if (!ok2) {
     log('Transfer interrupted — safe to retry.');
     await recoverState();
