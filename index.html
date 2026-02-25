@@ -63,10 +63,6 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 .stat { background: #ffffff; padding: 10px; text-align: center; }
 .stat .val { font-size: 1.25rem; font-weight: 400; color: #030303; }
 .stat .lbl { font-size: 0.65rem; color: #9D9D9D; text-transform: uppercase; letter-spacing: 0.08em; }
-.slider-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
-.slider-row input[type=range] { flex: 1; accent-color: #004AFF; }
-.slider-row .slider-val { font-size: 1rem; font-weight: 400; color: #030303; min-width: 50px; text-align: center; }
-.info { font-size: 0.75rem; color: #9D9D9D; margin: 4px 0; }
 .phase-display { font-size: 1.5rem; font-weight: 400; text-align: center; padding: 12px; letter-spacing: 0.02em; }
 .phase-probe { color: #9D9D9D; }
 .phase-count { color: #004AFF; }
@@ -171,26 +167,11 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 
   <!-- Rescue mode (v4.5.1 devices) -->
   <div id="rescueControls" style="display:none">
-    <button class="collapse-toggle" onclick="toggleAdvanced()" id="advToggle">+ Advanced settings</button>
-    <div id="advPanel" style="display:none">
-      <div class="slider-row">
-        <span style="font-size:12px;color:#888">Pacing:</span>
-        <input type="range" id="paceSlider" min="5" max="25" value="9" oninput="updatePaceLabel()">
-        <span id="paceLabel" class="slider-val">9ms</span>
-      </div>
-      <div class="info">Packet pacing delay. Lower = faster but riskier. Default 9ms.</div>
-    </div>
-    <div class="info" style="margin-top:8px">The update runs automatically and takes about 2 minutes.</div>
     <button id="btnRescue" class="btn-orange" onclick="fullRescue()" disabled>Start Update</button>
   </div>
 
   <!-- Safe mode (skeleton / part 2) -->
   <div id="safeControls" style="display:none">
-    <div class="slider-row">
-      <span style="font-size:12px;color:#888">Pacing:</span>
-      <input type="range" id="safePaceSlider" min="5" max="25" value="9" oninput="updateSafePaceLabel()">
-      <span id="safePaceLabel" class="slider-val">9ms</span>
-    </div>
     <button id="btnSafe" class="btn-orange" onclick="safeUpdate()" disabled>Start Update Part 2</button>
   </div>
 
@@ -199,6 +180,22 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
     <div style="border:1px solid #e0e0e0;padding:1rem;margin-bottom:12px">
       <div style="font-size:0.85rem;color:#030303;font-weight:400;margin-bottom:0.5rem">Part 1 complete</div>
       <div style="font-size:0.75rem;color:#555">Tap <strong>Connect</strong> above to reconnect to your MOON, then tap <strong>Start Update Part 2</strong> below.</div>
+    </div>
+  </div>
+
+  <!-- Stage 1 failure message -->
+  <div id="failurePrompt" style="display:none">
+    <div style="border:1px solid #e0e0e0;padding:1rem;margin-bottom:12px">
+      <div style="font-size:0.85rem;color:#030303;font-weight:400;margin-bottom:0.5rem">Update interrupted</div>
+      <div style="font-size:0.75rem;color:#555">Don't worry — this is normal and can happen. Your lamp is fine.<br>Tap <strong>Connect</strong> above to try again.</div>
+    </div>
+  </div>
+
+  <!-- Success message -->
+  <div id="successPrompt" style="display:none">
+    <div style="border:1px solid #004AFF;padding:1rem;margin-bottom:12px">
+      <div style="font-size:0.85rem;color:#004AFF;font-weight:400;margin-bottom:0.5rem">Update successful</div>
+      <div style="font-size:0.75rem;color:#555">Your MOON lamp has been updated to the latest firmware. The lamp will restart automatically.</div>
     </div>
   </div>
 
@@ -217,9 +214,11 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 </div>
 
 <div class="card">
-  <h2>Log</h2>
-  <div id="log" class="log"></div>
-  <button style="width:auto;padding:4px 12px;font-size:0.65rem;margin-top:6px;border:1px solid #e0e0e0;background:transparent;color:#9D9D9D" onclick="copyLog()" id="btnCopyLog">Copy</button>
+  <button class="collapse-toggle" onclick="toggleLog()" id="logToggle">&rsaquo; Log</button>
+  <div id="logPanel" style="display:none">
+    <div id="log" class="log"></div>
+    <button style="width:auto;padding:4px 12px;font-size:0.65rem;margin-top:6px;border:1px solid #e0e0e0;background:transparent;color:#9D9D9D" onclick="copyLog()" id="btnCopyLog">Copy</button>
+  </div>
 </div>
 
 <div class="footer">
@@ -347,23 +346,22 @@ function copyLog() {
   });
 }
 
-function toggleAdvanced() {
-  const panel = document.getElementById('advPanel');
-  const btn = document.getElementById('advToggle');
+function toggleLog() {
+  const panel = document.getElementById('logPanel');
+  const btn = document.getElementById('logToggle');
   if (panel.style.display === 'none') {
     panel.style.display = '';
-    btn.textContent = '- Hide advanced settings';
+    btn.innerHTML = '&lsaquo; Log';
   } else {
     panel.style.display = 'none';
-    btn.textContent = '+ Advanced settings';
+    btn.innerHTML = '&rsaquo; Log';
   }
 }
 
-function updatePaceLabel() {
-  document.getElementById('paceLabel').textContent = document.getElementById('paceSlider').value + 'ms';
-}
-function updateSafePaceLabel() {
-  document.getElementById('safePaceLabel').textContent = document.getElementById('safePaceSlider').value + 'ms';
+function hideAllPrompts() {
+  document.getElementById('stage2Prompt').style.display = 'none';
+  document.getElementById('failurePrompt').style.display = 'none';
+  document.getElementById('successPrompt').style.display = 'none';
 }
 
 function log(msg) {
@@ -430,7 +428,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function doConnect() {
   try {
-    document.getElementById('stage2Prompt').style.display = 'none';
+    hideAllPrompts();
     log('Requesting BLE device...');
     device = await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: 'MOON' }],
@@ -761,25 +759,24 @@ function stopOTA() {
 
 async function safeUpdate() {
   document.getElementById('safeControls').style.display = 'none';
-  document.getElementById('stage2Prompt').style.display = 'none';
+  hideAllPrompts();
   showStage(2);
   log('========== Part 2: Full firmware ==========');
-  const paceMs = parseInt(document.getElementById('safePaceSlider').value);
   // Skeleton has no WDT — write-with-response is safe and reliable
-  const ok = await transferOTA(fullFw, false, paceMs);
+  const ok = await transferOTA(fullFw, false, 9);
   if (ok) {
-    showPhase('Update complete', 'phase-go');
+    hidePhase();
+    hideStage();
     log('Update complete! Device rebooting into ' + FW_FULL_VERSION + '.');
-    setTimeout(() => {
-      hidePhase(); isSkeleton = false; rxChar = null;
-      setConnStatus('Ready for next device', 'disconnected');
-      showMode(); checkReady();
-    }, 5000);
+    document.getElementById('successPrompt').style.display = '';
+    isSkeleton = false;
+    rxChar = null;
+    setConnStatus('Update complete', 'disconnected');
   } else {
     log('OTA failed.');
     await recoverState();
+    hideStage();
   }
-  hideStage();
 }
 
 // ============================================================
@@ -788,7 +785,8 @@ async function safeUpdate() {
 
 async function fullRescue() {
   document.getElementById('rescueControls').style.display = 'none';
-  const paceMs = parseInt(document.getElementById('paceSlider').value);
+  hideAllPrompts();
+  const paceMs = 9;
 
   // ==================== STAGE 1 ====================
   showStage(1);
@@ -887,6 +885,7 @@ async function fullRescue() {
     isSkeleton = false;
     rxChar = null;
     setConnStatus('Disconnected', 'disconnected');
+    document.getElementById('failurePrompt').style.display = '';
     showMode();
     checkReady();
     return;
