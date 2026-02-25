@@ -505,8 +505,16 @@ async function doConnect() {
     showMode();
     checkReady();
   } catch (err) {
-    log(`Connect error: ${err.message}`);
-    setConnStatus(`Error: ${err.message}`, 'error');
+    const msg = err.message || '';
+    log(`Connect error: ${msg}`);
+    if (/adapter/i.test(msg)) {
+      setConnStatus('No Bluetooth adapter found', 'error');
+      log('Make sure Bluetooth is turned on in your system settings.');
+    } else if (/cancelled|canceled|chooser/i.test(msg)) {
+      setConnStatus('Not connected', 'disconnected');
+    } else {
+      setConnStatus(`Error: ${msg}`, 'error');
+    }
   }
 }
 
