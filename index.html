@@ -32,13 +32,12 @@ button {
 }
 button:disabled { opacity: 0.3; cursor: not-allowed; }
 button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
-.btn-blue { border-color: #030303; color: #030303; }
-.btn-green { border-color: #030303; color: #030303; }
-.btn-green:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 .btn-red { border-color: #8a1b1b; color: #8a1b1b; }
 .btn-red:not(:disabled):hover { border-color: #030303; color: #030303; }
-.btn-orange { border-color: #030303; color: #030303; background: #030303; color: #ffffff; }
-.btn-orange:not(:disabled):hover { background: #004AFF; border-color: #004AFF; color: #ffffff; }
+.btn-primary { border-color: #004AFF; color: #ffffff; background: #004AFF; }
+.btn-primary:not(:disabled):hover { background: #0038cc; border-color: #0038cc; color: #ffffff; }
+.btn-done { border-color: #e0e0e0; color: #9D9D9D; background: transparent; }
+.btn-done:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 .status { font-size: 0.8rem; color: #9D9D9D; margin-top: 6px; word-break: break-all; }
 
 .progress-bar {
@@ -155,7 +154,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 
 <div class="card">
   <h2>Connect</h2>
-  <button id="btnConnect" class="btn-blue" onclick="doConnect()">Connect to MOON device</button>
+  <button id="btnConnect" class="btn-primary" onclick="doConnect()">Connect to MOON device</button>
   <div id="connStatus" class="fw-status">
     <span class="fw-dot" id="connDot" style="background:#9D9D9D"></span>
     <span id="connText">Not connected</span>
@@ -167,12 +166,12 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 
   <!-- Rescue mode (v4.5.1 devices) -->
   <div id="rescueControls" style="display:none">
-    <button id="btnRescue" class="btn-orange" onclick="fullRescue()" disabled>Start Update</button>
+    <button id="btnRescue" class="btn-primary" onclick="fullRescue()" disabled>Start Update</button>
   </div>
 
   <!-- Safe mode (skeleton / part 2) -->
   <div id="safeControls" style="display:none">
-    <button id="btnSafe" class="btn-orange" onclick="safeUpdate()" disabled>Start Update Part 2</button>
+    <button id="btnSafe" class="btn-primary" onclick="safeUpdate()" disabled>Start Update Part 2</button>
   </div>
 
   <!-- Between-stages message -->
@@ -186,8 +185,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
   <!-- Stage 1 failure message -->
   <div id="failurePrompt" style="display:none">
     <div style="border:1px solid #e0e0e0;padding:1rem;margin-bottom:12px">
-      <div style="font-size:0.85rem;color:#030303;font-weight:400;margin-bottom:0.5rem">Update interrupted</div>
-      <div style="font-size:0.75rem;color:#555">Don't worry — this is normal and can happen. Your lamp is fine.<br>Tap <strong>Connect</strong> above to try again.</div>
+      <div style="font-size:0.75rem;color:#555">We're sorry, it doesn't always work from the first time. Please tap <strong>Connect</strong> above to try again.</div>
     </div>
   </div>
 
@@ -378,6 +376,13 @@ function setConnStatus(text, state) {
   const dot = document.getElementById('connDot');
   const colors = { connected: '#030303', disconnected: '#9D9D9D', error: '#cc0000', pending: '#004AFF' };
   dot.style.background = colors[state] || colors.disconnected;
+  // Connect button: blue when user needs to act, subdued when connected
+  const btn = document.getElementById('btnConnect');
+  if (state === 'connected') {
+    btn.className = 'btn-done';
+  } else {
+    btn.className = 'btn-primary';
+  }
 }
 
 function showPhase(text, cls) {
@@ -863,7 +868,7 @@ async function fullRescue() {
   const launchAt = performance.now() + delay * 1000;
   while (performance.now() < launchAt) {
     const rem = ((launchAt - performance.now()) / 1000).toFixed(1);
-    showPhase(`Stage 1 in ${rem}s`, 'phase-count');
+    showPhase(`Stage 1 starts in ${rem}s`, 'phase-count');
     if (!server || !server.connected) {
       log('Connection lost!'); hidePhase(); hideStage(); showMode(); checkReady(); return;
     }
@@ -880,6 +885,7 @@ async function fullRescue() {
     log('Press Connect to try again.');
     hidePhase();
     hideStage();
+    resetProgress();
     // Device crashed back to v4.5.1 — do NOT run recoverState() which
     // can falsely detect skeleton (device is rebooting, won't answer probes)
     isSkeleton = false;
