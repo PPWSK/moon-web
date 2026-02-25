@@ -145,13 +145,15 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 <div class="card">
   <h2>How It Works</h2>
   <div class="instructions">
+    <p style="margin-bottom:0.5rem">The update has two parts:</p>
     <ol>
       <li><strong>Turn on</strong> your MOON lamp and wait for it to boot (~5s)</li>
-      <li>Tap <strong>Connect</strong> below and select your MOON device</li>
-      <li>Tap <strong>Start Update</strong> &mdash; the page handles everything automatically</li>
-      <li>Your MOON reboots with updated firmware</li>
+      <li>Tap <strong>Connect</strong> and select your MOON device</li>
+      <li>Tap <strong>Start Update</strong> &mdash; part 1 runs automatically</li>
+      <li>When part 1 finishes, tap <strong>Connect</strong> again to reconnect</li>
+      <li>Tap <strong>Start Update Part 2</strong> to complete the update</li>
     </ol>
-    <div class="note">The update is time-sensitive. Keep your phone/computer close to the lamp and don't switch apps during transfer.</div>
+    <div class="note">Keep your phone/computer close to the lamp and don't switch apps during transfer.</div>
   </div>
 </div>
 
@@ -182,21 +184,22 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
     <button id="btnRescue" class="btn-orange" onclick="fullRescue()" disabled>Start Update</button>
   </div>
 
-  <!-- Safe mode (skeleton devices) -->
+  <!-- Safe mode (skeleton / part 2) -->
   <div id="safeControls" style="display:none">
-    <div class="info">Skeleton detected &mdash; safe transfer, no time pressure.</div>
     <div class="slider-row">
       <span style="font-size:12px;color:#888">Pacing:</span>
       <input type="range" id="safePaceSlider" min="5" max="25" value="9" oninput="updateSafePaceLabel()">
       <span id="safePaceLabel" class="slider-val">9ms</span>
     </div>
-    <button id="btnSafe" class="btn-green" onclick="safeUpdate()" disabled>Start OTA</button>
+    <button id="btnSafe" class="btn-orange" onclick="safeUpdate()" disabled>Start Update Part 2</button>
   </div>
 
-  <!-- Between-stages reconnect -->
-  <div id="skelConnectBox" style="display:none">
-    <div class="info" style="color:#b85c00;font-size:13px;margin-bottom:8px">Stage 1 complete! Tap below to connect to the skeleton device.</div>
-    <button id="btnSkelConnect" class="btn-green" onclick="connectToSkeleton()">Connect to MOON (SKEL)</button>
+  <!-- Between-stages message -->
+  <div id="stage2Prompt" style="display:none">
+    <div style="border:1px solid #e0e0e0;padding:1rem;margin-bottom:12px">
+      <div style="font-size:0.85rem;color:#030303;font-weight:400;margin-bottom:0.5rem">Part 1 complete</div>
+      <div style="font-size:0.75rem;color:#555">Tap <strong>Connect</strong> above to reconnect to your MOON, then tap <strong>Start Update Part 2</strong> below.</div>
+    </div>
   </div>
 
   <div id="stageLabel" style="display:none"></div>
@@ -427,6 +430,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function doConnect() {
   try {
+    document.getElementById('stage2Prompt').style.display = 'none';
     log('Requesting BLE device...');
     device = await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: 'MOON' }],
@@ -534,62 +538,6 @@ function onNotify(event) {
       log('Device confirmed OTA complete!');
     }
   } catch (e) {}
-}
-
-// ============================================================
-//  Skeleton connect (fresh BLE scan after stage 1)
-// ============================================================
-
-let skelConnectResolve = null;
-
-function promptSkelConnect() {
-  return new Promise(resolve => {
-    skelConnectResolve = resolve;
-    document.getElementById('skelConnectBox').style.display = '';
-  });
-}
-
-async function connectToSkeleton() {
-  const btn = document.getElementById('btnSkelConnect');
-  btn.disabled = true;
-  try {
-    device = await navigator.bluetooth.requestDevice({
-      filters: [{ namePrefix: 'MOON' }],
-      optionalServices: [NUS_SERVICE]
-    });
-    log(`Selected: ${device.name}`);
-    setConnStatus(`Connecting to ${device.name}...`, 'pending');
-
-    device.addEventListener('gattserverdisconnected', () => {
-      log('Disconnected.');
-      setConnStatus('Disconnected', 'disconnected');
-      running = false;
-    });
-
-    server = await device.gatt.connect();
-    log('GATT connected');
-    await acquireNUS();
-
-    document.getElementById('skelConnectBox').style.display = 'none';
-
-    isSkeleton = device.name && device.name.toUpperCase().includes('SKEL');
-
-    if (skelConnectResolve) {
-      skelConnectResolve(true);
-      skelConnectResolve = null;
-    } else {
-      setConnStatus(`Connected: ${device.name}`, 'connected');
-      showMode();
-      checkReady();
-    }
-  } catch (err) {
-    log(`Connect error: ${err.message}`);
-    btn.disabled = false;
-    if (skelConnectResolve) {
-      skelConnectResolve(false);
-      skelConnectResolve = null;
-    }
-  }
 }
 
 // ============================================================
@@ -813,7 +761,9 @@ function stopOTA() {
 
 async function safeUpdate() {
   document.getElementById('safeControls').style.display = 'none';
-  log('========== OTA: Full firmware ==========');
+  document.getElementById('stage2Prompt').style.display = 'none';
+  showStage(2);
+  log('========== Part 2: Full firmware ==========');
   const paceMs = parseInt(document.getElementById('safePaceSlider').value);
   // Skeleton has no WDT — write-with-response is safe and reliable
   const ok = await transferOTA(fullFw, false, paceMs);
@@ -942,72 +892,22 @@ async function fullRescue() {
     return;
   }
 
-  // --- Wait for skeleton boot, then connect ---
-  log('Waiting for device to reboot into skeleton...');
-  showPhase('Stage 1 done!', 'phase-go');
+  // --- Wait for skeleton boot, then prompt user to reconnect ---
+  log('Waiting for device to reboot...');
+  showPhase('Part 1 complete', 'phase-go');
   await waitForDisconnect(15000);
 
   hidePhase();
-  log('Tap the button below to connect to MOON (SKEL)...');
-
-  const skelConnected = await promptSkelConnect();
-  if (!skelConnected) {
-    log('Could not connect to skeleton.');
-    await recoverState();
-    return;
-  }
-
-  // Verify skeleton
-  showPhase('Verifying...', 'phase-count');
-  log('Checking device name...');
-
-  const name = await readDeviceName();
-  if (name) {
-    log(`Device name: "${name}"`);
-    if (!name.toUpperCase().includes('SKEL')) {
-      log(`Device is "${name}" — not skeleton! Stage 1 may have failed.`);
-      await recoverState();
-      return;
-    }
-    log('Skeleton confirmed!');
-  } else {
-    log('Could not read device name — proceeding anyway.');
-  }
-
-  setConnStatus(`Connected: ${device.name}`, 'connected');
-
-  // ==================== STAGE 2 ====================
-  showStage(2);
-  log('============================');
-  log('  STAGE 2: Full Firmware');
-  log('============================');
-
-  showPhase('Stage 2: Full firmware...', 'phase-count');
-
-  // Stage 2: write-with-response (matching Flutter app — reliable, no time pressure)
-  const ok2 = await transferOTA(fullFw, false, paceMs);
-  if (!ok2) {
-    log('Transfer interrupted — safe to retry.');
-    await recoverState();
-    return;
-  }
-
-  // ==================== DONE ====================
   hideStage();
-  showPhase('Update complete', 'phase-go');
-  log('====================================');
-  log('  Update complete!');
-  log('  Device rebooting into ' + FW_FULL_VERSION);
-  log('====================================');
+  log('Part 1 done. Tap Connect to reconnect, then Start Update Part 2.');
 
-  setTimeout(() => {
-    hidePhase();
-    isSkeleton = false;
-    rxChar = null;
-    setConnStatus('Ready for next device', 'disconnected');
-    showMode();
-    checkReady();
-  }, 5000);
+  // Show the prompt and switch to skeleton mode so Connect + Part 2 button work
+  isSkeleton = true;
+  rxChar = null;
+  setConnStatus('Disconnected — ready for part 2', 'disconnected');
+  document.getElementById('stage2Prompt').style.display = '';
+  showMode();
+  checkReady();
 }
 
 // ============================================================
