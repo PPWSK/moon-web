@@ -96,6 +96,11 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 .fw-dot.loading { background: #9D9D9D; }
 .fw-dot.ready { background: #030303; }
 .fw-dot.error { background: #cc0000; }
+@keyframes dot-blink {
+  0%, 100% { background: #004AFF; }
+  50% { background: #9D9D9D; }
+}
+.fw-dot.connecting { animation: dot-blink 1s ease-in-out infinite; }
 
 /* Collapsible */
 .collapse-toggle {
@@ -163,6 +168,13 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 
 <div class="card">
   <h2>Transfer</h2>
+
+  <!-- Already up to date -->
+  <div id="upToDatePrompt" style="display:none">
+    <div style="border:1px solid #e0e0e0;padding:1rem;margin-bottom:12px">
+      <div style="font-size:0.75rem;color:#555">Your lamp is already on the latest firmware. No update needed.</div>
+    </div>
+  </div>
 
   <!-- Rescue mode (v4.5.1 devices) -->
   <div id="rescueControls" style="display:none">
@@ -303,6 +315,8 @@ let probing = false;
 let ackedCount = 0;
 let lastAckedN = -1;
 let isSkeleton = false;
+let deviceVersion = null;
+let alreadyUpToDate = false;
 
 // ============================================================
 //  Auto-fetch firmware
@@ -360,6 +374,7 @@ function hideAllPrompts() {
   document.getElementById('stage2Prompt').style.display = 'none';
   document.getElementById('failurePrompt').style.display = 'none';
   document.getElementById('successPrompt').style.display = 'none';
+  document.getElementById('upToDatePrompt').style.display = 'none';
 }
 
 function log(msg) {
@@ -374,15 +389,16 @@ function updateUI(id, text) { document.getElementById(id).textContent = text; }
 function setConnStatus(text, state) {
   document.getElementById('connText').textContent = text;
   const dot = document.getElementById('connDot');
-  const colors = { connected: '#030303', disconnected: '#9D9D9D', error: '#cc0000', pending: '#004AFF' };
-  dot.style.background = colors[state] || colors.disconnected;
-  // Connect button: blue when user needs to act, subdued when connected
-  const btn = document.getElementById('btnConnect');
-  if (state === 'connected') {
-    btn.className = 'btn-done';
+  dot.className = 'fw-dot';
+  if (state === 'pending') {
+    dot.classList.add('connecting');
+    dot.style.background = '';
   } else {
-    btn.className = 'btn-primary';
+    const colors = { connected: '#030303', disconnected: '#9D9D9D', error: '#cc0000' };
+    dot.style.background = colors[state] || colors.disconnected;
   }
+  const btn = document.getElementById('btnConnect');
+  btn.className = (state === 'connected') ? 'btn-done' : 'btn-primary';
 }
 
 function showPhase(text, cls) {
@@ -413,7 +429,7 @@ function resetProgress() {
 }
 
 function showMode() {
-  document.getElementById('rescueControls').style.display = isSkeleton ? 'none' : '';
+  document.getElementById('rescueControls').style.display = (isSkeleton || alreadyUpToDate) ? 'none' : '';
   document.getElementById('safeControls').style.display = isSkeleton ? '' : 'none';
 }
 
@@ -421,7 +437,7 @@ function checkReady() {
   if (isSkeleton) {
     document.getElementById('btnSafe').disabled = !(rxChar && fullFw);
   } else {
-    document.getElementById('btnRescue').disabled = !(rxChar && skeletonFw && fullFw);
+    document.getElementById('btnRescue').disabled = alreadyUpToDate || !(rxChar && skeletonFw && fullFw);
   }
 }
 
@@ -456,18 +472,34 @@ async function doConnect() {
     log('GATT connected');
     await acquireNUS();
 
+    deviceVersion = null;
+    alreadyUpToDate = false;
+
     if (isSkeleton) {
       setConnStatus(`Connected: ${device.name}`, 'connected');
       log('Skeleton detected. Safe to OTA — no WDT.');
     } else {
       const ver = await queryDeviceVersion();
+      deviceVersion = ver;
       if (ver) {
-        setConnStatus(`Connected: ${device.name} — firmware ${ver}`, 'connected');
-        log(`Device firmware: ${ver}`);
+        // Strip leading 'v' for comparison
+        const cleanVer = ver.replace(/^v/i, '');
+        const targetVer = FW_FULL_VERSION.replace(/^v/i, '');
+        if (cleanVer === targetVer) {
+          alreadyUpToDate = true;
+          setConnStatus(`Connected: ${device.name} — firmware ${ver}`, 'connected');
+          log(`Device firmware: ${ver} — already up to date.`);
+          document.getElementById('upToDatePrompt').style.display = '';
+        } else {
+          setConnStatus(`Connected: ${device.name} — firmware ${ver}`, 'connected');
+          log(`Device firmware: ${ver} — update available.`);
+        }
       } else {
         setConnStatus(`Connected: ${device.name}`, 'connected');
       }
-      await prepDevice();
+      if (!alreadyUpToDate) {
+        await prepDevice();
+      }
     }
 
     showMode();
