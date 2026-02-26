@@ -606,11 +606,17 @@ async function autoReconnect(waitS, maxRetries) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       server = await device.gatt.connect();
+      // Chrome Windows resolves connect() before GATT is fully ready —
+      // wait a moment then verify before service discovery
+      await sleep(800);
+      if (!server.connected) throw new Error('Connection dropped after connect');
       await acquireNUS();
       log(`Reconnected (attempt ${attempt}).`);
       return true;
     } catch (err) {
       log(`Reconnect ${attempt}/${maxRetries}: ${err.message}`);
+      // Disconnect cleanly before retrying so Chrome releases the GATT handle
+      try { device.gatt.disconnect(); } catch (e) {}
       await sleep(2000);
     }
   }
@@ -879,7 +885,7 @@ async function fullRescue() {
 
   // --- Reconnect after probe ---
   log('Reconnecting after probe...');
-  if (!await autoReconnect(6, 10)) {
+  if (!await autoReconnect(8, 10)) {
     log('Reconnect failed! Refresh page and retry.');
     hidePhase(); hideStage();
     return;
