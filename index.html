@@ -1060,27 +1060,47 @@ async function transferOTA(fw, noResponse, paceMs) {
       log('Holding the watchdog open while the lamp verifies...');
       const ka = new Uint8Array(3);
       ka[0] = 0x4F; ka[1] = 0xFF; ka[2] = 0xFF;   // index 65535: always rejected
-      // MUST be writeValueWithResponse: the RX characteristic declares only
-      // ESP_GATT_CHAR_PROP_BIT_WRITE, so writeValueWithoutResponse() throws on
-      // this firmware (that is also why the no-response skeleton path drops
-      // packets). Ping every 1.5 s so several land inside the 10 s window.
-      const kaUntil = performance.now() + 45000;
-      let kaSent = 0, kaFail = 0;
+      // Two jobs in one loop.
+      //
+      // 1. FEED THE WATCHDOG. ota_process subscribes BTC_TASK to the task
+      //    watchdog and never unsubscribes; only an arriving OTA packet feeds
+      //    it. Stop sending and it panics 10 s later, mid-finalize.
+      //
+      // 2. RETRY THE FINALIZE. The lamp answers {"ota":"done"} the moment the
+      //    finalize packet arrives, then spawns ota_finalize_task to do the
+      //    real work - and never checks whether xTaskCreate succeeded. When it
+      //    fails (8 KB stack, tight heap) nothing happens at all: no
+      //    verification, no reboot, no error. Crucially ota_process returns on
+      //    the finalize path WITHOUT advancing lastPacketNo, so the same
+      //    finalize packet stays valid and re-sending it retries the spawn.
+      //
+      // Both writes must be write-WITH-response: the RX characteristic only
+      // declares ESP_GATT_CHAR_PROP_BIT_WRITE.
+      const kaUntil = performance.now() + 60000;
+      let kaSent = 0, refin = 0, lastRefin = performance.now();
       while (performance.now() < kaUntil && server && server.connected) {
         await sleep(1500);
         if (!server || !server.connected) break;
+        // A successful finalize reboots the lamp within ~2 s, so if we are
+        // still here after 5 s the spawn failed - ask for it again.
+        const retry = (performance.now() - lastRefin) > 5000 && refin < 8;
         try {
-          await rxChar.writeValueWithResponse(ka);
-          kaSent++;
-          if (kaSent % 4 === 0) log(`  ...watchdog fed (${kaSent})`);
+          await rxChar.writeValueWithResponse(retry ? fin : ka);
+          if (retry) {
+            refin++; lastRefin = performance.now();
+            log(`  finalize not acted on — re-sending (${refin})`);
+          } else {
+            kaSent++;
+            if (kaSent % 4 === 0) log(`  ...watchdog fed (${kaSent})`);
+          }
         } catch (e) {
-          kaFail++;
           log(`  keepalive stopped: ${e.message}`); // usually the reboot we want
           break;
         }
       }
-      log(`Watchdog held for ${kaSent * 2}s; lamp ${server && server.connected
-            ? 'still connected' : 'rebooted (expected)'}.`);
+      log(`Held ${Math.round(kaSent * 1.5)}s, finalize re-sent ${refin}x; lamp `
+        + `${server && server.connected ? 'STILL CONNECTED (did not apply)'
+                                        : 'rebooted (expected)'}.`);
     } catch (err) {
       log(`Finalize err (may be OK): ${err.message}`);
     }
