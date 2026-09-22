@@ -470,25 +470,38 @@ function downloadLog() {
 let logUploaded = false;
 let runStarted = false;
 
-// sendBeacon first: it is queued by the browser and survives the page being
-// closed or the phone locking mid-transfer, which is exactly when the logs we
-// most want to see would otherwise be lost. fetch is the fallback.
+// Delivery detail that matters: Apps Script answers a POST with a 302 to
+// script.googleusercontent.com, and the browser DROPS the request body when it
+// follows that redirect - a log posted in the body arrives empty. The QUERY
+// STRING survives, so the transcript travels there instead.
+//
+// sendBeacon is still the transport: it is queued by the browser and survives
+// the page being closed or the phone locking mid-transfer, which is exactly
+// when the logs we most want to see would otherwise be lost.
+const LOG_URL_MAX = 7000;
+
 function uploadLog(reason) {
   if (!LOG_UPLOAD_URL) return;
   logUploaded = true;
-  const body = `reason=${reason}\n` + fullLogText();
+  let text = `reason=${reason}\n` + fullLogText();
+  let enc = encodeURIComponent(text);
+  if (enc.length > LOG_URL_MAX) {
+    // Keep the header and the TAIL - the end is where a failure shows itself.
+    let keep = 120;
+    do {
+      text = `reason=${reason}\n` + logHeader() +
+             '\n...earlier lines trimmed...\n' + LOG_LINES.slice(-keep).join('\n') + '\n';
+      enc = encodeURIComponent(text);
+      keep = Math.floor(keep * 0.7);
+    } while (enc.length > LOG_URL_MAX && keep > 5);
+  }
+  const url = LOG_UPLOAD_URL + '?log=' + enc;
   try {
-    if (navigator.sendBeacon) {
-      const ok = navigator.sendBeacon(LOG_UPLOAD_URL,
-        new Blob([body], { type: 'text/plain' }));
-      if (ok) { log('Log sent.'); return; }
-    }
+    if (navigator.sendBeacon && navigator.sendBeacon(url)) { log('Log sent.'); return; }
   } catch (e) {}
   try {
-    fetch(LOG_UPLOAD_URL, {
-      method: 'POST', mode: 'no-cors', keepalive: true,
-      headers: { 'Content-Type': 'text/plain' }, body,
-    }).then(() => log('Log sent.')).catch(() => {});
+    fetch(url, { mode: 'no-cors', keepalive: true })
+      .then(() => log('Log sent.')).catch(() => {});
   } catch (e) { /* never let logging break the rescue */ }
 }
 
