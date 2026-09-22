@@ -894,6 +894,22 @@ async function recoverState() {
     return;
   }
 
+  // The name/skeleton probing below is S18-specific: it assumes the only two
+  // possible states are "skeleton" or "v4.5.1", and concludes SKELETON from
+  // silence. On a direct-OTA model there is no skeleton in the picture at all,
+  // and silence just means the link dropped - so saying "retry stage 2" would
+  // send the user down a path that does not exist.
+  if (MODEL && MODELS[MODEL] && MODELS[MODEL].direct) {
+    isSkeleton = false;
+    log('Transfer did not finish. Nothing was changed — an incomplete update is '
+      + 'never activated, so your MOON is still on its previous firmware.');
+    log('Press Connect and start the update again.');
+    setConnStatus('Update interrupted — safe to retry', 'error');
+    showMode();
+    checkReady();
+    return;
+  }
+
   log('Detecting current firmware...');
   const name = await readDeviceName();
   if (name) {
