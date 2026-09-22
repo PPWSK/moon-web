@@ -449,6 +449,7 @@ function logHeader() {
     `browser   : ${n.userAgent}`,
     `platform  : ${n.platform || '?'}  lang=${n.language}`,
     `bluetooth : ${n.bluetooth ? 'present' : 'ABSENT'}`,
+    (DEVICE_INFO ? DEVICE_INFO.replace(/\n$/, '') : 'device    : (never connected)'),
     '-'.repeat(60),
   ].join('\n');
 }
@@ -644,6 +645,7 @@ async function doConnect() {
     if (isSkeleton) {
       setConnStatus(`Connected: ${device.name}`, 'connected');
       log('Skeleton detected. Safe to OTA — no WDT.');
+      DEVICE_INFO = 'device    : running SKELETON firmware\n';
     } else {
       const ver = await queryDeviceVersion();
       deviceVersion = ver;
@@ -677,7 +679,8 @@ async function doConnect() {
       } else {
         setConnStatus(`Connected: ${device.name}`, 'connected');
       }
-      if (!alreadyUpToDate) {
+      await captureDeviceInfo();
+      if (!alreadyUpToDate && !modelMismatch) {
         await prepDevice();
       }
     }
@@ -709,6 +712,55 @@ async function acquireNUS() {
   await txChar.startNotifications();
   txChar.addEventListener('characteristicvaluechanged', onNotify);
   log('NUS ready.');
+}
+
+// A full get_info_extended does not fit in one notification - the firmware
+// splits it across packets with a small binary header. Rather than decode that
+// framing, accumulate every notification for a fixed window, keep the printable
+// bytes and pull the outermost JSON object out of the result. Even if it will
+// not parse, the raw text is still worth having in the log.
+let DEVICE_INFO = '';
+
+async function queryInfo(cmd, ms) {
+  return new Promise((resolve) => {
+    let buf = '';
+    const handler = (event) => {
+      const raw = new Uint8Array(event.target.value.buffer);
+      for (let i = 0; i < raw.length; i++) {
+        const b = raw[i];
+        if (b >= 0x20 && b < 0x7f) buf += String.fromCharCode(b);
+      }
+    };
+    txChar.addEventListener('characteristicvaluechanged', handler);
+    rxChar.writeValueWithResponse(new TextEncoder().encode(cmd)).catch(() => {});
+    setTimeout(() => {
+      txChar.removeEventListener('characteristicvaluechanged', handler);
+      const a = buf.indexOf('{'), b2 = buf.lastIndexOf('}');
+      resolve(a >= 0 && b2 > a ? buf.slice(a, b2 + 1) : buf);
+    }, ms);
+  });
+}
+
+// Everything we can read off the lamp, captured into the log header so it
+// survives truncation even if the session runs long. This is the whole point
+// of a connect test on a lamp we cannot otherwise reach.
+async function captureDeviceInfo() {
+  try {
+    log('Reading device info...');
+    const info = await queryInfo('{"get_info":true}', 2000);
+    const ext  = await queryInfo('{"get_info_extended":true}', 3500);
+    DEVICE_INFO = '';
+    if (info) DEVICE_INFO += 'get_info          : ' + info + '\n';
+    if (ext)  DEVICE_INFO += 'get_info_extended : ' + ext + '\n';
+    if (!info && !ext) {
+      DEVICE_INFO = 'get_info          : (no reply)\n';
+      log('Device did not answer get_info.');
+    } else {
+      log(`Device info captured (${(info || '').length} + ${(ext || '').length} chars).`);
+    }
+  } catch (e) {
+    DEVICE_INFO = 'get_info          : (error ' + (e.message || e) + ')\n';
+  }
 }
 
 async function queryDeviceVersion() {
