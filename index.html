@@ -1060,13 +1060,24 @@ async function transferOTA(fw, noResponse, paceMs) {
       log('Holding the watchdog open while the lamp verifies...');
       const ka = new Uint8Array(3);
       ka[0] = 0x4F; ka[1] = 0xFF; ka[2] = 0xFF;   // index 65535: always rejected
-      const kaUntil = performance.now() + 40000;
-      let kaSent = 0;
+      // MUST be writeValueWithResponse: the RX characteristic declares only
+      // ESP_GATT_CHAR_PROP_BIT_WRITE, so writeValueWithoutResponse() throws on
+      // this firmware (that is also why the no-response skeleton path drops
+      // packets). Ping every 1.5 s so several land inside the 10 s window.
+      const kaUntil = performance.now() + 45000;
+      let kaSent = 0, kaFail = 0;
       while (performance.now() < kaUntil && server && server.connected) {
-        await sleep(2000);
+        await sleep(1500);
         if (!server || !server.connected) break;
-        try { await rxChar.writeValueWithoutResponse(ka); kaSent++; }
-        catch (e) { break; }   // lamp rebooted = what we want
+        try {
+          await rxChar.writeValueWithResponse(ka);
+          kaSent++;
+          if (kaSent % 4 === 0) log(`  ...watchdog fed (${kaSent})`);
+        } catch (e) {
+          kaFail++;
+          log(`  keepalive stopped: ${e.message}`); // usually the reboot we want
+          break;
+        }
       }
       log(`Watchdog held for ${kaSent * 2}s; lamp ${server && server.connected
             ? 'still connected' : 'rebooted (expected)'}.`);
