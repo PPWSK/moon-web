@@ -484,6 +484,7 @@ function downloadLog() {
 let lastUploadedCount = 0;
 let runStarted = false;
 let modelMismatch = false;
+let deviceModel = null;   // model reported over GATT - authoritative
 
 // Delivery detail that matters: Apps Script answers a POST with a 302 to
 // script.googleusercontent.com, and the browser DROPS the request body when it
@@ -615,23 +616,15 @@ async function doConnect() {
 
     isSkeleton = device.name && device.name.toUpperCase().includes('SKEL');
 
-    // The advertised name is "MOON (<model>) <MAC>", and the model comes from
-    // the firmware build. Flashing one model's image onto another is a very
-    // effective way to brick a lamp, so it is refused outright.
     modelMismatch = false;
+    deviceModel = null;
+    // The advertised name is "MOON (<model>) <MAC>" — but ANDROID CACHES IT
+    // from the first time it ever saw the device, so a controller first flashed
+    // as one model keeps advertising that name forever. It is a hint for the
+    // log, never grounds to refuse an update. The real check is the model the
+    // running firmware reports over GATT (get_info -> name), below.
     const adv = /MOON\s*\(([^)]+)\)/i.exec(device.name || '');
-    const advModel = adv ? adv[1].trim().toUpperCase() : null;
-    if (!isSkeleton && advModel) {
-      const want = (MODELS[MODEL].expect || []).map((x) => x.toUpperCase());
-      log(`Device reports model: ${advModel} (this page is set to ${MODELS[MODEL].label})`);
-      if (want.length && want.indexOf(advModel) === -1) {
-        modelMismatch = true;
-        log(`STOPPED: that is a ${advModel}, not a ${want.join('/')}. ` +
-            `Sending ${FW_FULL_VERSION} to it could brick it.`);
-        setConnStatus(`Wrong model: device is a ${advModel}`, 'error');
-        uploadLog('model-mismatch');
-      }
-    }
+    if (adv) log(`Advertised name says ${adv[1].trim()} (cached by the OS, not reliable)`);
 
     device.addEventListener('gattserverdisconnected', () => {
       if (!probing) {
@@ -654,6 +647,20 @@ async function doConnect() {
     } else {
       const ver = await queryDeviceVersion();
       deviceVersion = ver;
+      if (deviceModel) {
+        const want = (MODELS[MODEL].expect || []).map((x) => x.toUpperCase());
+        log(`Running firmware reports model: ${deviceModel}`);
+        if (want.length && want.indexOf(deviceModel) === -1) {
+          modelMismatch = true;
+          log(`STOPPED: this is a ${deviceModel}, but the page is set to ` +
+              `${MODELS[MODEL].label}. Sending ${FW_FULL_VERSION} could brick it.`);
+          setConnStatus(`Wrong model: device is a ${deviceModel}`, 'error');
+          uploadLog('model-mismatch');
+        }
+      } else {
+        log('Device did not report its model; not blocking, but be sure it is a ' +
+            MODELS[MODEL].label + '.');
+      }
       if (ver) {
         // Strip leading 'v' for comparison
         const cleanVer = ver.replace(/^v/i, '');
@@ -711,10 +718,15 @@ async function queryDeviceVersion() {
       const text = new TextDecoder().decode(new Uint8Array(event.target.value.buffer));
       try {
         const obj = JSON.parse(text);
-        if (obj.fw_version) {
+        // The firmware answers get_info with sw_version + name. (fw_version is
+        // kept for older builds; looking only for it is why this used to time
+        // out silently and never show a version.)
+        const ver = obj.sw_version || obj.fw_version;
+        if (ver) {
           resolved = true;
+          deviceModel = (obj.name || '').toUpperCase() || null;
           txChar.removeEventListener('characteristicvaluechanged', handler);
-          resolve(obj.fw_version);
+          resolve(ver);
         }
       } catch (e) {}
     };
