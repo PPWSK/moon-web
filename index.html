@@ -476,7 +476,10 @@ function downloadLog() {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
-let logUploaded = false;
+// Upload gating: anything NEW in the transcript is worth having. The case we
+// most need from the field is "I cannot even connect", which never reaches a
+// transfer - so this must not be tied to one starting.
+let lastUploadedCount = 0;
 let runStarted = false;
 
 // Delivery detail that matters: Apps Script answers a POST with a 302 to
@@ -491,7 +494,8 @@ const LOG_URL_MAX = 7000;
 
 function uploadLog(reason) {
   if (!LOG_UPLOAD_URL) return;
-  logUploaded = true;
+  if (LOG_LINES.length <= lastUploadedCount) return; // nothing new to say
+  lastUploadedCount = LOG_LINES.length;
   let text = `reason=${reason}\n` + fullLogText();
   let enc = encodeURIComponent(text);
   if (enc.length > LOG_URL_MAX) {
@@ -506,18 +510,23 @@ function uploadLog(reason) {
   }
   const url = LOG_UPLOAD_URL + '?log=' + enc;
   try {
-    if (navigator.sendBeacon && navigator.sendBeacon(url)) { log('Log sent.'); return; }
+    if (navigator.sendBeacon && navigator.sendBeacon(url)) {
+      log('Log sent.');
+      lastUploadedCount = LOG_LINES.length; // don't let that line look like news
+      return;
+    }
   } catch (e) {}
   try {
     fetch(url, { mode: 'no-cors', keepalive: true })
-      .then(() => log('Log sent.')).catch(() => {});
+      .then(() => { log('Log sent.'); lastUploadedCount = LOG_LINES.length; })
+      .catch(() => {});
   } catch (e) { /* never let logging break the rescue */ }
 }
 
 // If they give up, close the tab or the phone sleeps mid-transfer, that is the
 // most interesting case of all - so send what we have on the way out.
 window.addEventListener('pagehide', () => {
-  if (runStarted && !logUploaded) uploadLog('abandoned');
+  if (MODEL) uploadLog(runStarted ? 'abandoned' : 'left-page');
 });
 
 // Anything that escapes the handlers still ends up in the transcript.
@@ -646,9 +655,13 @@ async function doConnect() {
 
     showMode();
     checkReady();
+    // The connection result IS the diagnosis for a lamp that "won't connect":
+    // reaching here means it advertised, accepted a link and answered us.
+    uploadLog('connected');
   } catch (err) {
     const msg = err.message || '';
     log(`Connect error: ${msg}`);
+    if (!/cancelled|canceled|chooser/i.test(msg)) uploadLog('connect-failed');
     if (/adapter/i.test(msg)) {
       setConnStatus('No Bluetooth adapter found', 'error');
       log('Make sure Bluetooth is turned on in your system settings.');
@@ -977,7 +990,7 @@ async function directUpdate() {
 // ============================================================
 
 async function safeUpdate() {
-  runStarted = true; logUploaded = false;
+  runStarted = true;
   document.getElementById('safeControls').style.display = 'none';
   hideAllPrompts();
   showStage(2);
@@ -1006,7 +1019,7 @@ async function safeUpdate() {
 // ============================================================
 
 async function fullRescue() {
-  runStarted = true; logUploaded = false;
+  runStarted = true;
   if (MODEL && MODELS[MODEL] && MODELS[MODEL].direct) return directUpdate();
   document.getElementById('rescueControls').style.display = 'none';
   hideAllPrompts();
