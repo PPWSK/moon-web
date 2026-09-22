@@ -1072,13 +1072,38 @@ async function directUpdate() {
   log(`Sending ${FW_FULL_VERSION} with flow control. This takes a few minutes.`);
   const ok = await transferOTA(fullFw, false, 9);
   if (ok) {
+    // {"ota":"done"} only means the finalize packet was RECEIVED. The firmware
+    // answers first and validates the SHA256 afterwards, on its own task - and
+    // if that fails it logs "image is corrupted", deletes the task and never
+    // reboots. So the only honest confirmation is to reconnect and read the
+    // version back.
+    log('Transfer sent. Verifying the lamp actually booted the new firmware...');
+    showPhase('Verifying...', 'phase-probe');
+    let verified = null;
+    try {
+      if (await autoReconnect(12, 4)) verified = await queryDeviceVersion();
+    } catch (e) { log(`Verify failed: ${e.message}`); }
     hidePhase();
     hideStage();
-    log('Update complete! Device rebooting into ' + FW_FULL_VERSION + '.');
-    uploadLog('success');
-    document.getElementById('successPrompt').style.display = '';
+    const want = FW_FULL_VERSION.replace(/^v/i, '');
+    if (verified && verified.replace(/^v/i, '') === want) {
+      log(`VERIFIED: lamp is now running ${verified}.`);
+      uploadLog('success');
+      document.getElementById('successPrompt').style.display = '';
+      setConnStatus(`Updated to ${verified}`, 'connected');
+    } else if (verified) {
+      log(`NOT UPDATED: the lamp still reports ${verified}, not ${FW_FULL_VERSION}.`);
+      log('The transfer arrived but the lamp rejected the image (failed its '
+        + 'checksum) or rolled back. Nothing was damaged. Please try again.');
+      uploadLog('transfer-ok-but-not-applied');
+      setConnStatus(`Still on ${verified} — not updated`, 'error');
+    } else {
+      log('Could not read the version back, so the update is UNCONFIRMED. '
+        + 'Reconnect and check the firmware version before assuming it worked.');
+      uploadLog('unconfirmed');
+      setConnStatus('Unconfirmed — please reconnect and check', 'error');
+    }
     rxChar = null;
-    setConnStatus('Update complete', 'disconnected');
   } else {
     log('OTA failed.');
     uploadLog('ota-failed');
