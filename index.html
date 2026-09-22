@@ -1049,7 +1049,14 @@ async function transferOTA(fw, noResponse, paceMs) {
   }
 
   const totalTime = ((performance.now() - startTime) / 1000).toFixed(1);
-  log(`Transfer: ${totalTime}s. ${completed ? 'OK' : 'INCOMPLETE'}`);
+  // The device acks every packet by number. Acks == packets sent means the
+  // lamp RECEIVED everything, so if the image is still rejected the bytes
+  // themselves were wrong (short writes) rather than lost - which is the one
+  // fact that separates "corrupted in transit" from "flashed then rolled back".
+  log(`Transfer: ${totalTime}s. ${completed ? 'OK' : 'INCOMPLETE'} — `
+    + `sent ${totalPackets}, acked ${ackedCount}`
+    + (ackedCount === totalPackets ? ' (device got every packet)'
+                                   : ` (device MISSED ${totalPackets - ackedCount})`));
 
   running = false;
   document.getElementById('btnStop').style.display = 'none';
