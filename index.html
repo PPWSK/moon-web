@@ -1043,6 +1043,33 @@ async function transferOTA(fw, noResponse, paceMs) {
         await rxChar.writeValueWithResponse(fin);
       }
       log('Finalize sent.');
+
+      // Keep the lamp's watchdog fed while it validates the image.
+      //
+      // ota_process() subscribes the BLE task to the task watchdog and never
+      // unsubscribes; the ONLY thing that feeds it is another OTA packet
+      // arriving. After finalize no packets arrive, so the watchdog fires
+      // CONFIG_ESP_TASK_WDT_TIMEOUT_S (10 s) later and panics the lamp in the
+      // middle of esp_ota_end()'s SHA-256 - before it can switch the boot
+      // partition. The image lands perfectly and is then never activated.
+      //
+      // esp_task_wdt_reset() runs at the TOP of ota_process, before the
+      // out-of-order check, so a packet with a deliberately wrong index feeds
+      // the watchdog and is otherwise ignored. Send one every 2 s until the
+      // lamp reboots itself (which is how a real success ends).
+      log('Holding the watchdog open while the lamp verifies...');
+      const ka = new Uint8Array(3);
+      ka[0] = 0x4F; ka[1] = 0xFF; ka[2] = 0xFF;   // index 65535: always rejected
+      const kaUntil = performance.now() + 40000;
+      let kaSent = 0;
+      while (performance.now() < kaUntil && server && server.connected) {
+        await sleep(2000);
+        if (!server || !server.connected) break;
+        try { await rxChar.writeValueWithoutResponse(ka); kaSent++; }
+        catch (e) { break; }   // lamp rebooted = what we want
+      }
+      log(`Watchdog held for ${kaSent * 2}s; lamp ${server && server.connected
+            ? 'still connected' : 'rebooted (expected)'}.`);
     } catch (err) {
       log(`Finalize err (may be OK): ${err.message}`);
     }
@@ -1088,7 +1115,9 @@ async function directUpdate() {
     showPhase('Verifying...', 'phase-probe');
     let verified = null;
     try {
-      if (await autoReconnect(12, 4)) verified = await queryDeviceVersion();
+      // A reboot takes ~7 s to reach BLE advertising, and Chrome often fails
+      // the first connect to a device that has only just come back.
+      if (await autoReconnect(10, 10)) verified = await queryDeviceVersion();
     } catch (e) { log(`Verify failed: ${e.message}`); }
     hidePhase();
     hideStage();
