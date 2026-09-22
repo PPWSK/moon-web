@@ -172,6 +172,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
       <li>When part 1 finishes, tap <strong>Connect</strong> again to reconnect</li>
       <li>Tap <strong>Start Update Part 2</strong> to complete the update</li>
     </ol>
+    <div class="note" id="directNote" style="display:none">For <strong>MOON Ninety</strong> this is a <strong>single transfer</strong> &mdash; there is no part 2. It takes a few minutes; leave this page open.</div>
     <div class="note">Keep your phone/computer close to the MOON and don't switch apps during transfer.</div>
   </div>
 </div>
@@ -326,12 +327,20 @@ const MODELS = {
     skeleton: 'firmware/skeleton_s90_bridge.bin',
     full: 'firmware/moon_s90_487.bin',
     version: 'v4.8.7',
+    // The S90 does NOT have the v4.5.1 watchdog bug the skeleton exists to work
+    // around - its own firmware completes a full 1.2 MB BLE OTA in ~260 s. So it
+    // goes straight to the full image: no probe, no skeleton, and crucially
+    // write-WITH-response, which is flow controlled. The skeleton path's
+    // 27 KB/s write-without-response firehose overran the lamp's receive buffer
+    // and disconnected at the same packet (~220/610) every single time.
+    direct: true,
   },
   eighteen: {
     label: 'MOON Eighteen',
     skeleton: 'firmware/skeleton.bin',
     full: 'firmware/moon_s18.bin',
     version: 'v4.8.0',
+    direct: false, // needs the probe + skeleton: v4.5.1's WDT kills OTA in 10-25 s
   },
 };
 
@@ -938,6 +947,32 @@ function stopOTA() {
 }
 
 // ============================================================
+//  Direct OTA - for firmware that can survive a normal transfer
+// ============================================================
+
+async function directUpdate() {
+  hideAllPrompts();
+  showStage(2);
+  log('========== Direct OTA (no skeleton needed) ==========');
+  log(`Sending ${FW_FULL_VERSION} with flow control. This takes a few minutes.`);
+  const ok = await transferOTA(fullFw, false, 9);
+  if (ok) {
+    hidePhase();
+    hideStage();
+    log('Update complete! Device rebooting into ' + FW_FULL_VERSION + '.');
+    uploadLog('success');
+    document.getElementById('successPrompt').style.display = '';
+    rxChar = null;
+    setConnStatus('Update complete', 'disconnected');
+  } else {
+    log('OTA failed.');
+    uploadLog('ota-failed');
+    await recoverState();
+    hideStage();
+  }
+}
+
+// ============================================================
 //  Safe mode: OTA full firmware to skeleton device
 // ============================================================
 
@@ -972,6 +1007,7 @@ async function safeUpdate() {
 
 async function fullRescue() {
   runStarted = true; logUploaded = false;
+  if (MODEL && MODELS[MODEL] && MODELS[MODEL].direct) return directUpdate();
   document.getElementById('rescueControls').style.display = 'none';
   hideAllPrompts();
   const paceMs = 9;
@@ -1117,6 +1153,7 @@ function chooseModel(key) {
   document.getElementById('chosenText').textContent = `${m.label} — ${m.version}`;
   document.getElementById('chosenBar').style.display = '';
   document.querySelectorAll('.flow').forEach((el) => { el.style.display = ''; });
+  if (m.direct) document.getElementById('directNote').style.display = '';
   log(`Model selected: ${m.label} (${key}), target ${m.version}`);
   loadBundledFirmware();
 }
