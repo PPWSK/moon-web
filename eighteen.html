@@ -142,26 +142,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 <!-- Main content (hidden on unsupported platforms) -->
 <div id="mainContent">
 
-<div class="card" id="modelCard">
-  <h2>Which MOON do you have?</h2>
-  <button id="btnNinety" class="btn-primary" onclick="chooseModel('ninety')">MOON Ninety</button>
-  <button class="btn-done" onclick="showOtherModels()" id="btnOther">Different model</button>
-  <div id="otherModels" style="display:none">
-    <button onclick="chooseModel('eighteen')">MOON Eighteen</button>
-  </div>
-</div>
-
-<div id="chosenBar" class="card" style="display:none">
-  <h2>Model</h2>
-  <div class="fw-status">
-    <span class="fw-dot" style="background:#004AFF"></span>
-    <span id="chosenText"></span>
-    <button class="btn-done" style="width:auto;padding:4px 12px;font-size:0.65rem;margin-left:12px"
-            onclick="location.reload()">Change</button>
-  </div>
-</div>
-
-<div class="card flow" style="display:none">
+<div class="card">
   <h2>How It Works</h2>
   <div class="instructions">
     <p style="margin-bottom:0.5rem">The update has two parts:</p>
@@ -176,7 +157,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
   </div>
 </div>
 
-<div class="card flow" style="display:none">
+<div class="card">
   <h2>Connect</h2>
   <button id="btnConnect" class="btn-primary" onclick="doConnect()">Connect to MOON device</button>
   <div id="connStatus" class="fw-status">
@@ -185,7 +166,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
   </div>
 </div>
 
-<div class="card flow" style="display:none">
+<div class="card">
   <h2>Transfer</h2>
 
   <!-- Already up to date -->
@@ -247,8 +228,6 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
   <div id="logPanel" style="display:none">
     <div id="log" class="log"></div>
     <button style="width:auto;padding:4px 12px;font-size:0.65rem;margin-top:6px;border:1px solid #e0e0e0;background:transparent;color:#9D9D9D" onclick="copyLog()" id="btnCopyLog">Copy</button>
-    <button style="width:auto;padding:4px 12px;font-size:0.65rem;margin-top:6px;margin-left:6px;border:1px solid #e0e0e0;background:transparent;color:#9D9D9D" onclick="downloadLog()">Download</button>
-    <div class="note" style="margin-top:8px">This log is sent to A.D.U. automatically so we can see what happened &mdash; you don't need to do anything with it.</div>
   </div>
 </div>
 
@@ -317,33 +296,9 @@ const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const NUS_RX      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 const NUS_TX      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
-// Per-model payloads. The transfer logic is identical for every model - only
-// these three values differ - so the model is a runtime choice rather than a
-// separate page. eighteen.html keeps the original single-model page verbatim.
-const MODELS = {
-  ninety: {
-    label: 'MOON Ninety',
-    skeleton: 'firmware/skeleton_s90_bridge.bin',
-    full: 'firmware/moon_s90_487.bin',
-    version: 'v4.8.7',
-  },
-  eighteen: {
-    label: 'MOON Eighteen',
-    skeleton: 'firmware/skeleton.bin',
-    full: 'firmware/moon_s18.bin',
-    version: 'v4.8.0',
-  },
-};
-
-let MODEL = null;              // set by chooseModel()
-let FW_SKELETON_URL = null;
-let FW_FULL_URL     = null;
-let FW_FULL_VERSION = null;
-
-// The log is posted here automatically so a failed rescue can be read without
-// asking the customer for anything. Sheet: "MOON Rescue Logs".
-const LOG_UPLOAD_URL =
-  'https://script.google.com/macros/s/AKfycby4ZxtDyqZWguAhFEbOd8uokQWSVswIPwY0Wl0pz_7vCcMATHe9ABuhd203AEhjybZe/exec';
+const FW_SKELETON_URL = 'firmware/skeleton.bin';
+const FW_FULL_URL     = 'firmware/moon_s18.bin';
+const FW_FULL_VERSION = 'v4.8.0';
 
 // ============================================================
 //  State
@@ -395,7 +350,7 @@ async function loadBundledFirmware() {
 // ============================================================
 
 function copyLog() {
-  const text = fullLogText();
+  const text = document.getElementById('log').textContent;
   navigator.clipboard.writeText(text).then(() => {
     const btn = document.getElementById('btnCopyLog');
     btn.textContent = 'Copied';
@@ -422,87 +377,12 @@ function hideAllPrompts() {
   document.getElementById('upToDatePrompt').style.display = 'none';
 }
 
-// The log is the only thing we get back when a rescue fails in the field, so
-// it is captured in full (not just rendered), survives a reload, and can be
-// copied, downloaded or posted.
-let LOG_LINES = [];
-
-function logHeader() {
-  const n = navigator;
-  return [
-    `MOON rescue log`,
-    `when      : ${new Date().toISOString()}`,
-    `model     : ${MODEL ? MODELS[MODEL].label + ' (' + MODEL + ')' : '(not chosen)'}`,
-    `payload   : ${FW_FULL_VERSION || '-'}  ${FW_FULL_URL || ''}`,
-    `page      : ${location.href}`,
-    `browser   : ${n.userAgent}`,
-    `platform  : ${n.platform || '?'}  lang=${n.language}`,
-    `bluetooth : ${n.bluetooth ? 'present' : 'ABSENT'}`,
-    '-'.repeat(60),
-  ].join('\n');
-}
-
 function log(msg) {
   const el = document.getElementById('log');
-  const now = new Date();
-  const ts = now.toLocaleTimeString();
-  LOG_LINES.push(`[${now.toISOString()}] ${msg}`);
-  if (el) {
-    el.textContent += `[${ts}] ${msg}\n`;
-    el.scrollTop = el.scrollHeight;
-  }
-  try { localStorage.setItem('moonRescueLog', LOG_LINES.slice(-800).join('\n')); } catch (e) {}
+  const ts = new Date().toLocaleTimeString();
+  el.textContent += `[${ts}] ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
 }
-
-function fullLogText() {
-  return logHeader() + '\n' + LOG_LINES.join('\n') + '\n';
-}
-
-function downloadLog() {
-  const blob = new Blob([fullLogText()], { type: 'text/plain' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `moon-rescue-${MODEL || 'log'}-${Date.now()}.txt`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-}
-
-let logUploaded = false;
-let runStarted = false;
-
-// sendBeacon first: it is queued by the browser and survives the page being
-// closed or the phone locking mid-transfer, which is exactly when the logs we
-// most want to see would otherwise be lost. fetch is the fallback.
-function uploadLog(reason) {
-  if (!LOG_UPLOAD_URL) return;
-  logUploaded = true;
-  const body = `reason=${reason}\n` + fullLogText();
-  try {
-    if (navigator.sendBeacon) {
-      const ok = navigator.sendBeacon(LOG_UPLOAD_URL,
-        new Blob([body], { type: 'text/plain' }));
-      if (ok) { log('Log sent.'); return; }
-    }
-  } catch (e) {}
-  try {
-    fetch(LOG_UPLOAD_URL, {
-      method: 'POST', mode: 'no-cors', keepalive: true,
-      headers: { 'Content-Type': 'text/plain' }, body,
-    }).then(() => log('Log sent.')).catch(() => {});
-  } catch (e) { /* never let logging break the rescue */ }
-}
-
-// If they give up, close the tab or the phone sleeps mid-transfer, that is the
-// most interesting case of all - so send what we have on the way out.
-window.addEventListener('pagehide', () => {
-  if (runStarted && !logUploaded) uploadLog('abandoned');
-});
-
-// Anything that escapes the handlers still ends up in the transcript.
-window.addEventListener('error', (e) =>
-  log(`JS ERROR: ${e.message} @${e.filename}:${e.lineno}`));
-window.addEventListener('unhandledrejection', (e) =>
-  log(`UNHANDLED REJECTION: ${e.reason && e.reason.message ? e.reason.message : e.reason}`));
 
 function updateUI(id, text) { document.getElementById(id).textContent = text; }
 
@@ -929,7 +809,6 @@ function stopOTA() {
 // ============================================================
 
 async function safeUpdate() {
-  runStarted = true; logUploaded = false;
   document.getElementById('safeControls').style.display = 'none';
   hideAllPrompts();
   showStage(2);
@@ -940,14 +819,12 @@ async function safeUpdate() {
     hidePhase();
     hideStage();
     log('Update complete! Device rebooting into ' + FW_FULL_VERSION + '.');
-    uploadLog('success');
     document.getElementById('successPrompt').style.display = '';
     isSkeleton = false;
     rxChar = null;
     setConnStatus('Update complete', 'disconnected');
   } else {
     log('OTA failed.');
-    uploadLog('ota-failed');
     await recoverState();
     hideStage();
   }
@@ -958,7 +835,6 @@ async function safeUpdate() {
 // ============================================================
 
 async function fullRescue() {
-  runStarted = true; logUploaded = false;
   document.getElementById('rescueControls').style.display = 'none';
   hideAllPrompts();
   const paceMs = 9;
@@ -1089,27 +965,8 @@ async function fullRescue() {
 //  Init
 // ============================================================
 
-function showOtherModels() {
-  document.getElementById('otherModels').style.display = '';
-  document.getElementById('btnOther').style.display = 'none';
-}
-
-function chooseModel(key) {
-  MODEL = key;
-  const m = MODELS[key];
-  FW_SKELETON_URL = m.skeleton;
-  FW_FULL_URL     = m.full;
-  FW_FULL_VERSION = m.version;
-  document.getElementById('modelCard').style.display = 'none';
-  document.getElementById('chosenText').textContent = `${m.label} — ${m.version}`;
-  document.getElementById('chosenBar').style.display = '';
-  document.querySelectorAll('.flow').forEach((el) => { el.style.display = ''; });
-  log(`Model selected: ${m.label} (${key}), target ${m.version}`);
-  loadBundledFirmware();
-}
-
 if (detectPlatform()) {
-  log('Page ready. Waiting for model selection.');
+  loadBundledFirmware();
 }
 </script>
 </body>
