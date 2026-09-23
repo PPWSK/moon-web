@@ -173,7 +173,8 @@ a.plain { color:#004AFF; text-decoration:none; }
     <li>Press <strong>Choose USB port</strong> and pick the entry that appears (often "FT231X" or "USB Serial")</li>
     <li>Press <strong>Install firmware</strong> and leave it alone for about a minute</li>
   </ol>
-  <button id="btnPort" class="btn-primary" onclick="choosePort()">Choose USB port</button>
+  <button id="btnPort" class="btn-primary" onclick="choosePort(false)">Choose USB port</button>
+  <button id="btnAnyPort" style="display:none" onclick="choosePort(true)">Show every serial device</button>
   <div id="portStatus" class="fw-status">
     <span class="fw-dot" id="portDot" style="background:#9D9D9D"></span>
     <span id="portText">No port selected</span>
@@ -228,6 +229,14 @@ const MODELS = {
 };
 const LOG_UPLOAD_URL =
   'https://script.google.com/macros/s/AKfycby4ZxtDyqZWguAhFEbOd8uokQWSVswIPwY0Wl0pz_7vCcMATHe9ABuhd203AEhjybZe/exec';
+
+// The controller's USB bridge is an FTDI FT231X (U3 on moon_controller_hw).
+// Those descriptors come from the BRIDGE, not from the ESP32, so this works
+// even when the firmware is blank, crashing or missing - which is exactly when
+// this page gets used. Filtering means the customer sees their MOON and
+// nothing else, instead of a list of every serial device on the machine.
+const MOON_USB = [{ usbVendorId: 0x0403, usbProductId: 0x6015 }];
+const isMoonBridge = (i) => i && i.usbVendorId === 0x0403 && i.usbProductId === 0x6015;
 
 let MODEL = null, port = null, transport = null, esploader = null, busy = false;
 const LOG_LINES = [];
@@ -318,19 +327,33 @@ window.copyLog = function () {
   navigator.clipboard.writeText(logHeader() + '\n' + LOG_LINES.join('\n')).catch(() => {});
 };
 
-window.choosePort = async function () {
+function adoptPort(p, how) {
+  port = p;
+  const i = p.getInfo ? p.getInfo() : {};
+  log(`Port ${how} (USB ${(i.usbVendorId || 0).toString(16).padStart(4, '0')}:`
+    + `${(i.usbProductId || 0).toString(16).padStart(4, '0')}`
+    + `${isMoonBridge(i) ? ', FTDI FT231X — a MOON controller' : ' — NOT the FT231X a MOON uses'}).`);
+  if (!isMoonBridge(i)) log('Careful: that does not look like a MOON controller. '
+                          + 'Check you picked the right device before installing.');
+  setStatus('USB port selected', 'ok');
+  document.getElementById('btnFlash').disabled = false;
+}
+
+window.choosePort = async function (showEverything) {
   if (busy) return;
   try {
-    log('Opening the USB port chooser...');
-    port = await navigator.serial.requestPort();
-    const info = port.getInfo ? port.getInfo() : {};
-    log(`Port selected (USB vendor 0x${(info.usbVendorId || 0).toString(16)}, `
-      + `product 0x${(info.usbProductId || 0).toString(16)}).`);
-    setStatus('USB port selected', 'ok');
-    document.getElementById('btnFlash').disabled = false;
+    log(showEverything ? 'Opening the chooser with every serial device...'
+                       : 'Opening the USB port chooser...');
+    const p = await navigator.serial.requestPort(showEverything ? {} : { filters: MOON_USB });
+    adoptPort(p, 'selected');
   } catch (err) {
     log(`No port selected: ${err.message}`);
     setStatus('No port selected', 'error');
+    if (!showEverything) {
+      log('If the list was empty, this controller may use a different USB chip. '
+        + 'Use "Show every serial device" below and pick it by hand.');
+      document.getElementById('btnAnyPort').style.display = '';
+    }
     uploadLog('no-port');
   }
 };
@@ -424,6 +447,12 @@ if (!navigator.serial) {
   uploadLog('unsupported-browser');
 } else {
   log('Page ready. Web Serial available.');
+  // A port the customer already approved on an earlier visit comes back
+  // through getPorts() with no chooser at all - one less thing to get wrong.
+  navigator.serial.getPorts().then((ps) => {
+    const mine = ps.filter((p) => isMoonBridge(p.getInfo ? p.getInfo() : null));
+    if (mine.length === 1 && !port) adoptPort(mine[0], 'remembered from last time');
+  }).catch(() => {});
 }
 </script>
 </body>
