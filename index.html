@@ -374,6 +374,14 @@ let isSkeleton = false;
 let deviceVersion = null;
 let alreadyUpToDate = false;
 
+// Direct (Ninety) transfer: the link is allowed to drop and come back.
+let stopRequested = false;   // Stop button; distinct from `running`, which a disconnect clears
+let transferActive = false;  // while true, a disconnect is something to resume, not report
+let dupFloor = 0;            // out-of-order errors for packets below this are re-sends we expect
+let dupResolvedN = -1;       // highest re-sent packet the lamp rejected as already received
+let otaFatal = null;         // device reported an error that cannot be resumed from
+let desyncSeen = false;      // device rejected a packet we believed was in order
+
 // ============================================================
 //  Auto-fetch firmware
 // ============================================================
@@ -628,6 +636,11 @@ async function doConnect() {
     if (adv) log(`Advertised name says ${adv[1].trim()} (cached by the OS, not reliable)`);
 
     device.addEventListener('gattserverdisconnected', () => {
+      if (transferActive) {
+        // The direct transfer resumes across drops; the loop handles it.
+        setConnStatus('Link dropped — resuming', 'pending');
+        return;
+      }
       if (!probing) {
         log('Disconnected.');
         setConnStatus('Disconnected', 'disconnected');
@@ -830,6 +843,7 @@ async function sendJSON(obj) {
   await sleep(300);
 }
 
+let dupLogged = 0;
 function onNotify(event) {
   const raw = new Uint8Array(event.target.value.buffer);
   const text = new TextDecoder().decode(raw);
@@ -837,12 +851,34 @@ function onNotify(event) {
     if (text.includes('"ota":"ok"')) {
       const m = text.match(/"n":(\d+)/);
       if (m) {
-        lastAckedN = parseInt(m[1]);
+        // An "ok" for n means the lamp accepted n IN ORDER, so this is its
+        // exact position; it only ever moves forward.
+        lastAckedN = Math.max(lastAckedN, parseInt(m[1]));
         ackedCount = lastAckedN + 1;
         updateUI('statAcked', ackedCount);
       }
     } else if (text.includes('"ota":"error"')) {
-      log(`Device error: ${text}`);
+      const code = (text.match(/"code":"?(\d+)/) || [])[1];
+      const n = parseInt((text.match(/"n":(\d+)/) || [])[1]);
+      if (code === '1') {
+        // Out of order. The lamp accepts only lastPacketNo+1 and rejects
+        // everything else without touching flash, so after a resume the
+        // packets we re-send below `dupFloor` bounce off harmlessly until we
+        // reach the one it is waiting for. 65535 is the watchdog keepalive.
+        if (n === 65535) return;
+        if (n < dupFloor) {
+          // A rejected re-send proves the lamp is already past n: that is
+          // progress for the send window, even though nothing new was acked.
+          dupResolvedN = Math.max(dupResolvedN, n);
+          if (++dupLogged <= 2) log(`  packet ${n} already on the lamp (expected after a resume)`);
+        } else {
+          desyncSeen = true;
+          log(`Lamp rejected packet ${n} as out of order — re-syncing from its last ack.`);
+        }
+      } else {
+        otaFatal = text;
+        log(`Device error: ${text}`);
+      }
     } else if (text.includes('"ota":"done"')) {
       log('Device confirmed OTA complete!');
     }
@@ -1148,7 +1184,307 @@ async function transferOTA(fw, noResponse, paceMs) {
 
 function stopOTA() {
   running = false;
+  stopRequested = true;
   log('Stopping...');
+}
+
+// ============================================================
+//  Direct OTA transfer that survives link drops (Ninety path)
+// ============================================================
+//
+// Why this exists. The first OTA packet makes the lamp erase its whole update
+// partition: 2.5-7 s with the flash cache off. With WiFi running the BLE link
+// rides that out; on a lamp booted WITHOUT WiFi (which we need, for the heap
+// the finalize task must allocate) the link dies 2.0 s in with a supervision
+// timeout. Bench serial log, 5.0.3:
+//
+//   I (8214)  OTA: Starting...
+//   W (10215) BT_HCI: DiscCmpl evt: hdl=0, rsn=0x8
+//   I (10872) OTA: esp_ota_begin success!
+//   W (10874) BT_LOG: esp_ble_gatts_send_indicate, The connection not created.
+//
+// ...and then the lamp went on to process every packet it had already received
+// and kept waiting for the next one. ota_process() keeps its state in function
+// statics that nothing on the disconnect path touches, and it acks every
+// accepted packet by number, so a dropped link is simply resumed: reconnect and
+// carry on from the last number the lamp acknowledged. Packets it already has
+// are rejected as out of order without side effects.
+//
+// Hard constraint: from the first OTA packet on, the lamp's task watchdog
+// panics if 10 s pass without ota_process() being called. Every reconnect has
+// to land a packet inside that window, so nothing here waits politely.
+
+async function reconnectFast(maxAttempts) {
+  for (let a = 1; a <= maxAttempts; a++) {
+    try {
+      await sleep(a === 1 ? 500 : 1500);
+      server = await device.gatt.connect();
+      await sleep(300);
+      if (!server.connected) throw new Error('dropped right after connect');
+      await acquireNUS();
+      log(`Reconnected (attempt ${a}).`);
+      setConnStatus(`Connected: ${device.name}`, 'connected');
+      return true;
+    } catch (err) {
+      log(`Reconnect ${a}/${maxAttempts}: ${err.message}`);
+      try { device.gatt.disconnect(); } catch (e) {}
+    }
+  }
+  return false;
+}
+
+function writeWithTimeout(data, ms) {
+  return Promise.race([
+    rxChar.writeValueWithResponse(data),
+    sleep(ms).then(() => { throw new Error(`no response in ${ms} ms`); }),
+  ]);
+}
+
+async function transferDirect(fw) {
+  running = true;
+  stopRequested = false;
+  transferActive = true;
+  ackedCount = 0;
+  lastAckedN = -1;
+  otaFatal = null;
+  desyncSeen = false;
+  dupFloor = 0;
+  dupResolvedN = -1;
+  dupLogged = 0;
+  resetProgress();
+  document.getElementById('btnStop').style.display = '';
+  document.getElementById('btnStop').disabled = false;
+
+  const PAYLOAD_SIZE = 509;
+  const totalPackets = Math.ceil(fw.length / PAYLOAD_SIZE);
+  const WINDOW = 8;             // packets beyond the last ack before we wait
+  const ACK_STALL_MS = 7500;    // no ack for this long = the link is dead, whatever Chrome thinks
+  const MAX_RESUMES = 25;
+  const startTime = performance.now();
+  let next = 0, resumes = 0, desyncResets = 0, restarts = 0, finSent = 0, finLost = 0;
+
+  const connected = () => !!(server && server.connected);
+  const packetFor = (i) => {
+    const chunk = fw.slice(i * PAYLOAD_SIZE, Math.min((i + 1) * PAYLOAD_SIZE, fw.length));
+    const p = new Uint8Array(3 + chunk.length);
+    p[0] = 0x4F; p[1] = (i >> 8) & 0xFF; p[2] = i & 0xFF;
+    p.set(chunk, 3);
+    return p;
+  };
+  const showProgress = () => {
+    const elapsed = (performance.now() - startTime) / 1000;
+    const pct = (next / totalPackets * 100).toFixed(0);
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressText').style.display = '';
+    document.getElementById('progressText').textContent = pct + '%';
+    updateUI('statSent', next);
+    updateUI('statSpeed', (next * PAYLOAD_SIZE / 1024 / elapsed).toFixed(1));
+    updateUI('statEta', ((totalPackets - next) / (next / elapsed)).toFixed(0));
+    if (next % 100 === 0 || next === totalPackets) {
+      log(`${next}/${totalPackets} (${pct}%) ${(next * PAYLOAD_SIZE / 1024 / elapsed).toFixed(1)} KB/s, ${lastAckedN + 1} confirmed`);
+    }
+  };
+  // Reconnect and rewind to the lamp's last acknowledged packet.
+  const resume = async (why) => {
+    if (resumes >= MAX_RESUMES) { log(`Giving up after ${resumes} reconnects.`); return false; }
+    resumes++;
+    log(`Link lost (${why}) at packet ${next}, ${lastAckedN + 1} confirmed. Reconnecting (${resumes})...`);
+    showPhase('Reconnecting...', 'phase-count');
+    try { device.gatt.disconnect(); } catch (e) {}
+    if (!(await reconnectFast(8))) return false;
+    dupFloor = Math.max(dupFloor, next);
+    dupResolvedN = lastAckedN;
+    next = lastAckedN + 1;
+    log(`Resuming from packet ${next}.`);
+    showPhase('Transferring...', 'phase-count');
+    return true;
+  };
+  // How far the lamp is proven to be: the last packet it acked, or the last
+  // re-sent packet it rejected as already received - either resolves a packet
+  // we sent, and the send window is measured from here.
+  const resolved = () => Math.max(lastAckedN, dupResolvedN);
+  // Wait until the lamp resolves another packet, or the link/lamp gives up.
+  const waitForAck = async () => {
+    const t0 = performance.now(), before = resolved();
+    while (connected() && !desyncSeen && !otaFatal && !stopRequested
+           && resolved() === before && performance.now() - t0 < ACK_STALL_MS) {
+      await sleep(15);
+    }
+    return resolved() !== before;
+  };
+
+  log(`OTA: ${totalPackets} pkts with-resp, ${(fw.length / 1024).toFixed(1)} KB, resumable`);
+  showPhase('Transferring...', 'phase-count');
+
+  // ---- Erase phase: make the drop deliberate instead of a race ----------
+  // Packet 0 starts the erase. Queue a few more behind it: they are written
+  // the moment the erase ends, which feeds the watchdog and buys the reconnect
+  // 10 s from THEN rather than from packet 0. Then drop the link ourselves,
+  // wait the erase out, and resume. On a lamp whose link would have survived
+  // this only costs a few seconds.
+  try {
+    await writeWithTimeout(packetFor(0), 4000); next = 1;
+    for (let i = 1; i <= 3; i++) {
+      try { await writeWithTimeout(packetFor(i), 1200); next = i + 1; }
+      catch (e) { break; }
+    }
+  } catch (e) {
+    log(`First packet failed: ${e.message}`);
+  }
+  log(`Lamp is erasing its update partition (${next} packets queued). Dropping the link on purpose; resuming in a few seconds.`);
+  dupFloor = next;
+  try { device.gatt.disconnect(); } catch (e) {}
+  await sleep(2500);
+  showPhase('Reconnecting...', 'phase-count');
+  resumes++;
+  if (!(await reconnectFast(8))) {
+    log('Could not reconnect after the erase.');
+    transferActive = false; running = false;
+    document.getElementById('btnStop').style.display = 'none';
+    return false;
+  }
+  next = lastAckedN + 1;
+  log(`Resuming from packet ${next}.`);
+  showPhase('Transferring...', 'phase-count');
+
+  // ---- Main loop: windowed sends, resume on any drop ---------------------
+  let finalized = false;
+  while (!finalized) {
+    if (stopRequested) { log('Stopped by user.'); break; }
+    if (otaFatal) break;
+    if (!connected()) { if (!(await resume('disconnected'))) break; continue; }
+    if (desyncSeen) {
+      desyncSeen = false;
+      if (finSent > 0) {
+        // We only finalize once every packet is confirmed, so a rejected
+        // finalize means the lamp's OTA state is gone: it restarted, most
+        // likely into the new firmware. Verification will tell.
+        log('Lamp no longer accepts the finalize — it has probably restarted already. Verifying.');
+        break;
+      }
+      if (++desyncResets > 6) {
+        // Either the lamp restarted (watchdog) and is back at packet 0 with a
+        // fresh erase ahead of it, or something is badly wrong. One restart.
+        if (restarts++ >= 1) { log('Lamp keeps rejecting packets. Giving up.'); break; }
+        log('Lamp will not accept a resume — it probably restarted. Starting the transfer over.');
+        lastAckedN = -1; ackedCount = 0; dupFloor = 0; dupResolvedN = -1; next = 0; desyncResets = 0;
+        continue;
+      }
+      dupFloor = Math.max(dupFloor, next);
+      dupResolvedN = lastAckedN;   // forget what the rejections implied; acks are the truth
+      next = lastAckedN + 1;
+      log(`Re-sending from packet ${next}.`);
+      continue;
+    }
+
+    if (next < totalPackets) {
+      if (next - (resolved() + 1) >= WINDOW) {
+        if (!(await waitForAck())) {
+          if (stopRequested || otaFatal || desyncSeen) continue;
+          if (!connected()) continue;              // loop resumes
+          log(`No ack for ${ACK_STALL_MS / 1000}s at packet ${resolved() + 1}; treating the link as dead.`);
+          if (!(await resume('silent'))) break;
+        }
+        continue;
+      }
+      try {
+        await rxChar.writeValueWithResponse(packetFor(next));
+      } catch (err) {
+        log(`Write ${next} failed: ${err.message}`);
+        if (!(await resume('write failed'))) break;
+        continue;
+      }
+      next++;
+      showProgress();
+      continue;
+    }
+
+    // Everything sent: the lamp must have acknowledged the last packet before
+    // the finalize packet is in order.
+    if (lastAckedN < totalPackets - 1) {
+      if (!(await waitForAck())) {
+        if (stopRequested || otaFatal || desyncSeen) continue;
+        if (!connected()) continue;
+        log('Lamp went silent before confirming the last packets; treating the link as dead.');
+        if (!(await resume('silent'))) break;
+      }
+      continue;
+    }
+
+    // ---- Finalize --------------------------------------------------------
+    const r = await finalizeDirect(totalPackets);
+    if (r === 'lost') {
+      // The finalize write itself failed, so it never arrived. Once more.
+      if (finLost++ < 2 && await resume('finalize write failed')) continue;
+      break;
+    }
+    finSent++;
+    if (r === 'desync') continue;         // loop decides (see finSent above)
+    finalized = true;                     // 'rebooted' or 'stuck': verification decides
+  }
+
+  const totalTime = ((performance.now() - startTime) / 1000).toFixed(1);
+  const complete = lastAckedN === totalPackets - 1;
+  log(`Transfer: ${totalTime}s, ${resumes} reconnect${resumes === 1 ? '' : 's'}. `
+    + `${complete ? 'COMPLETE' : 'INCOMPLETE'} — lamp confirmed ${lastAckedN + 1}/${totalPackets}`
+    + `${finSent ? ', finalize sent' : ''}.`);
+
+  transferActive = false;
+  running = false;
+  hidePhase();
+  document.getElementById('btnStop').style.display = 'none';
+  return complete && finSent > 0;
+}
+
+// Send the finalize packet and keep the lamp company until it reboots.
+// Returns 'rebooted' (link dropped after finalize - what success looks like),
+// 'stuck' (still connected after a minute: finalize never acted on),
+// 'desync' (lamp rejected the finalize: it is missing packets) or 'lost'.
+async function finalizeDirect(totalPackets) {
+  const fin = new Uint8Array(3);
+  fin[0] = 0x4F; fin[1] = (totalPackets >> 8) & 0xFF; fin[2] = totalPackets & 0xFF;
+  const ka = new Uint8Array(3);
+  ka[0] = 0x4F; ka[1] = 0xFF; ka[2] = 0xFF;      // index 65535: always rejected, still feeds the WDT
+
+  dupFloor = totalPackets;   // a rejected finalize is a real desync, not a duplicate
+  try {
+    await rxChar.writeValueWithResponse(fin);
+  } catch (err) {
+    log(`Finalize write failed: ${err.message}`);
+    return 'lost';
+  }
+  log('Finalize sent. Holding the watchdog open while the lamp verifies...');
+  showPhase('Verifying image...', 'phase-probe');
+
+  // ota_process subscribes BTC_TASK to the task watchdog and only an arriving
+  // OTA packet feeds it, so keep packets arriving. The lamp answers "done"
+  // immediately and then spawns ota_finalize_task without checking the spawn
+  // succeeded; the finalize path does not advance lastPacketNo, so re-sending
+  // the same finalize packet retries the spawn. A successful finalize reboots
+  // the lamp within ~3 s.
+  const until = performance.now() + 60000;
+  let kaSent = 0, refin = 0, lastRefin = performance.now();
+  while (performance.now() < until && server && server.connected) {
+    await sleep(1500);
+    if (desyncSeen) return 'desync';
+    if (!server || !server.connected) break;
+    const retry = (performance.now() - lastRefin) > 5000 && refin < 8;
+    try {
+      await rxChar.writeValueWithResponse(retry ? fin : ka);
+      if (retry) { refin++; lastRefin = performance.now(); log(`  finalize not acted on — re-sending (${refin})`); }
+      else if (++kaSent % 4 === 0) log(`  ...watchdog fed (${kaSent})`);
+    } catch (e) {
+      log(`  keepalive stopped: ${e.message}`);    // usually the reboot we want
+      break;
+    }
+  }
+  if (desyncSeen) return 'desync';
+  if (server && server.connected) {
+    log(`Held ${Math.round(kaSent * 1.5)}s, finalize re-sent ${refin}x; lamp STILL CONNECTED (did not apply).`);
+    return 'stuck';
+  }
+  log(`Lamp dropped the link after finalize (${Math.round(kaSent * 1.5)}s) — expected on success.`);
+  return 'rebooted';
 }
 
 // ============================================================
@@ -1195,11 +1531,22 @@ async function directUpdate() {
 
   // ---- Step 3: transfer -------------------------------------------------
   showStage(2);
-  log(`Sending ${FW_FULL_VERSION} with flow control. This takes a few minutes.`);
-  const ok = await transferOTA(fullFw, false, 9);
+  log(`Sending ${FW_FULL_VERSION}. This takes a few minutes; the link may drop and come back, that is expected.`);
+  const ok = await transferDirect(fullFw);
   if (!ok) {
-    log('OTA failed.');
+    log('OTA did not complete. Nothing was activated — the lamp is still on its previous firmware.');
     uploadLog('ota-failed');
+    // The first OTA packet makes the firmware delete its display timers, so
+    // a lamp left mid-transfer sits frozen until it restarts. Restart it.
+    try {
+      if (!(server && server.connected)) await reconnectFast(4);
+      if (server && server.connected) {
+        log('Restarting the lamp so it goes back to normal operation.');
+        await sendJSON({ reboot: true });
+      } else {
+        log('Could not reach the lamp to restart it: switch its power off and on.');
+      }
+    } catch (e) { /* the restart drops the link */ }
     await recoverState();
     hideStage();
     return;
