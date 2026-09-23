@@ -221,6 +221,18 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
     </div>
   </div>
 
+  <!-- Transfer finished, but this browser cannot re-find the lamp on its own.
+       Chrome only discovers devices during requestDevice(), which needs a tap. -->
+  <div id="finishPrompt" style="display:none">
+    <div style="border:1px solid #004AFF;padding:1rem;margin-bottom:12px">
+      <div style="font-size:0.85rem;color:#004AFF;font-weight:400;margin-bottom:0.5rem">Almost done</div>
+      <div style="font-size:0.75rem;color:#555;margin-bottom:10px">The firmware was sent and your MOON restarted — that is what a successful
+        update looks like. This browser cannot find it again by itself. Tap below and pick your MOON once more, so we can confirm the
+        version and switch the light back on.</div>
+      <button id="btnFinish" class="btn-primary" onclick="finishUpdate()">Reconnect and finish</button>
+    </div>
+  </div>
+
   <!-- Success message -->
   <div id="successPrompt" style="display:none">
     <div style="border:1px solid #004AFF;padding:1rem;margin-bottom:12px">
@@ -381,6 +393,9 @@ let dupFloor = 0;            // out-of-order errors for packets below this are r
 let dupResolvedN = -1;       // highest re-sent packet the lamp rejected as already received
 let otaFatal = null;         // device reported an error that cannot be resumed from
 let desyncSeen = false;      // device rejected a packet we believed was in order
+let intentionalDrop = false; // we asked the lamp to restart; a drop is expected
+let chooserOpenedAt = 0;     // to tell "empty list, gave up" from "misclick"
+let wifiWasCleared = false;  // set when the update cleared the lamp's WiFi credentials
 
 // ============================================================
 //  Auto-fetch firmware
@@ -435,6 +450,7 @@ function toggleLog() {
 }
 
 function hideAllPrompts() {
+  document.getElementById('finishPrompt').style.display = 'none';
   document.getElementById('stage2Prompt').style.display = 'none';
   document.getElementById('failurePrompt').style.display = 'none';
   document.getElementById('successPrompt').style.display = 'none';
@@ -616,10 +632,12 @@ async function doConnect() {
   try {
     hideAllPrompts();
     log('Requesting BLE device...');
+    chooserOpenedAt = performance.now();
     device = await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: 'MOON' }],
       optionalServices: [NUS_SERVICE]
     });
+    log(`Device chooser: picked after ${((performance.now() - chooserOpenedAt) / 1000).toFixed(1)}s`);
     log(`Selected: ${device.name}`);
     setConnStatus(`Connecting to ${device.name}...`, 'pending');
 
@@ -635,18 +653,7 @@ async function doConnect() {
     const adv = /MOON\s*\(([^)]+)\)/i.exec(device.name || '');
     if (adv) log(`Advertised name says ${adv[1].trim()} (cached by the OS, not reliable)`);
 
-    device.addEventListener('gattserverdisconnected', () => {
-      if (transferActive) {
-        // The direct transfer resumes across drops; the loop handles it.
-        setConnStatus('Link dropped — resuming', 'pending');
-        return;
-      }
-      if (!probing) {
-        log('Disconnected.');
-        setConnStatus('Disconnected', 'disconnected');
-      }
-      running = false;
-    });
+    attachDisconnectHandler(device);
 
     server = await device.gatt.connect();
     log('GATT connected');
@@ -699,6 +706,17 @@ async function doConnect() {
       if (!alreadyUpToDate && !modelMismatch && !(MODELS[MODEL] && MODELS[MODEL].direct)) {
         await prepDevice();
       }
+      // Safety net. Brightness zero at BOTH day and night is a lamp that can
+      // never light up - nobody sets that on purpose; it is what an interrupted
+      // rescue leaves behind (prepDevice persists 0 and only a completed run put
+      // it back). So whatever the customer came here to do, undo that first.
+      const ds0 = deviceSettings || {};
+      if (!modelMismatch && MODELS[MODEL] && MODELS[MODEL].direct
+          && ds0.day_brightness < 0.01 && ds0.night_brightness < 0.01) {
+        log('This lamp is stored dark (brightness 0 for both day and night) — an '
+          + 'earlier attempt left it that way. Switching it back on.');
+        await wakeLamp();
+      }
     }
 
     showMode();
@@ -709,16 +727,49 @@ async function doConnect() {
   } catch (err) {
     const msg = err.message || '';
     log(`Connect error: ${msg}`);
-    if (!/cancelled|canceled|chooser/i.test(msg)) uploadLog('connect-failed');
+    // "User cancelled the requestDevice() chooser" is ALSO what you get when the
+    // chooser was empty and they gave up waiting - which is precisely the
+    // customer report we are trying to explain. It has to be uploaded, with how
+    // long the chooser was open, because a 40 s dismissal is a lamp that never
+    // appeared and a 2 s one is a misclick.
+    if (/cancelled|canceled|chooser/i.test(msg)) {
+      const secs = ((performance.now() - chooserOpenedAt) / 1000).toFixed(0);
+      log(`No MOON was selected (chooser open ${secs}s). If the list stayed empty, `
+        + `the lamp is not advertising or this device is already bonded to it.`);
+      uploadLog('no-device-selected');
+    } else {
+      uploadLog('connect-failed');
+    }
     if (/adapter/i.test(msg)) {
       setConnStatus('No Bluetooth adapter found', 'error');
       log('Make sure Bluetooth is turned on in your system settings.');
     } else if (/cancelled|canceled|chooser/i.test(msg)) {
-      setConnStatus('Not connected', 'disconnected');
+      setConnStatus('No MOON selected', 'disconnected');
     } else {
       setConnStatus(`Error: ${msg}`, 'error');
     }
   }
+}
+
+// A dropped link means three different things here: the lamp restarting because
+// we told it to, the transfer's own reconnect cycle, and an actual failure. Only
+// the last one should read as trouble.
+function attachDisconnectHandler(dev) {
+  dev.addEventListener('gattserverdisconnected', () => {
+    if (intentionalDrop) {
+      setConnStatus('Restarting the lamp...', 'pending');
+      return;
+    }
+    if (transferActive) {
+      setConnStatus('Link dropped — resuming', 'pending');
+      return;
+    }
+    if (!probing) {
+      log('Disconnected.');
+      setConnStatus('Disconnected', 'disconnected');
+    }
+    running = false;
+  });
 }
 
 async function acquireNUS() {
@@ -1463,7 +1514,7 @@ async function finalizeDirect(totalPackets) {
   // the same finalize packet retries the spawn. A successful finalize reboots
   // the lamp within ~3 s.
   const until = performance.now() + 60000;
-  let kaSent = 0, refin = 0, lastRefin = performance.now();
+  let kaSent = 0, refin = 0, lastRefin = performance.now(), writeFailed = false;
   while (performance.now() < until && server && server.connected) {
     await sleep(1500);
     if (desyncSeen) return 'desync';
@@ -1475,10 +1526,17 @@ async function finalizeDirect(totalPackets) {
       else if (++kaSent % 4 === 0) log(`  ...watchdog fed (${kaSent})`);
     } catch (e) {
       log(`  keepalive stopped: ${e.message}`);    // usually the reboot we want
+      writeFailed = true;
       break;
     }
   }
   if (desyncSeen) return 'desync';
+  // Chrome reports the failed write immediately but takes a moment to admit the
+  // link is gone, so `connected` is still true right after the lamp restarts.
+  // Reading it now is what produced a false "did not apply" on a good update.
+  if (writeFailed && server && server.connected) {
+    for (let i = 0; i < 12 && server.connected; i++) await sleep(250);
+  }
   if (server && server.connected) {
     log(`Held ${Math.round(kaSent * 1.5)}s, finalize re-sent ${refin}x; lamp STILL CONNECTED (did not apply).`);
     return 'stuck';
@@ -1505,7 +1563,9 @@ async function directUpdate() {
   // time_sync() returns before touching WiFi when the SSID is empty - so
   // clear the credentials, let the 10 s deferred save land, reboot, and the
   // lamp comes back with WiFi never started and its memory intact.
+  runStarted = true;
   const hadWifi = !!(deviceSettings && deviceSettings.wifi_ssid);
+  wifiWasCleared = hadWifi;
   if (hadWifi) {
     log(`WiFi is configured ("${deviceSettings.wifi_ssid}"). Clearing it so the `
       + `lamp boots with its memory free - the app can set it again afterwards.`);
@@ -1520,8 +1580,11 @@ async function directUpdate() {
 
   // ---- Step 2: clean reboot ---------------------------------------------
   log('Rebooting the lamp for a clean memory state...');
+  intentionalDrop = true;
+  showPhase('Restarting the lamp...', 'phase-probe');
   try { await sendJSON({ reboot: true }); } catch (e) { /* link drops on restart */ }
-  const back = await autoReconnect(6, 12);
+  const back = await autoReconnect(4, 12);
+  intentionalDrop = false;
   if (!back) {
     log('Lamp did not come back after the reboot. Press Connect and try again.');
     uploadLog('reboot-lost');
@@ -1553,45 +1616,110 @@ async function directUpdate() {
   }
 
   // ---- Step 4: verify by reading the version back -----------------------
+  // Reconnect IMMEDIATELY, not after a polite pause: on macOS, Chrome can only
+  // reach a device it has seen advertise recently, and it stops scanning the
+  // moment requestDevice() closes. Waiting 8 s cost us the handle entirely
+  // ("Bluetooth Device is no longer in range", ten times) on a lamp that had in
+  // fact updated perfectly. If it still cannot be reached, only a tap can open
+  // a fresh scan - so ask for one instead of calling a good update unconfirmed.
   log('Transfer sent. Verifying the lamp actually booted the new firmware...');
   showPhase('Verifying...', 'phase-probe');
-  let verified = null;
-  try {
-    if (await autoReconnect(8, 10)) verified = await queryDeviceVersion();
-  } catch (e) { log(`Verify failed: ${e.message}`); }
+  let reached = false;
+  try { reached = await reconnectFast(10); }
+  catch (e) { log(`Verify failed: ${e.message}`); }
   hidePhase();
   hideStage();
+  if (reached) {
+    if (await verifyAndWake()) return;
+  } else {
+    log('This browser can no longer reach the lamp by itself — it only discovers '
+      + 'devices while the chooser is open.');
+  }
+  if (!reached) {
+    setConnStatus('Almost done — tap Reconnect and finish', 'pending');
+    hideAllPrompts();
+    document.getElementById('finishPrompt').style.display = '';
+    uploadLog('needs-manual-verify');
+  }
+  rxChar = reached ? rxChar : null;
+}
+
+// Read the version back over a live connection and, if it is the one we sent,
+// leave the lamp switched on. Called both from the automatic path and from the
+// manual "Reconnect and finish" button.
+async function verifyAndWake() {
   const want = FW_FULL_VERSION.replace(/^v/i, '');
+  let verified = null;
+  try { verified = await queryDeviceVersion(); }
+  catch (e) { log(`Could not read the version: ${e.message}`); }
+
   if (verified && verified.replace(/^v/i, '') === want) {
     log(`VERIFIED: lamp is now running ${verified}.`);
-    // ---- Step 5: make sure it comes back as a working lamp --------------
-    // Restore what we read at the start; if that was already dark or frozen
-    // (an earlier attempt, or dev settings), use sane defaults instead.
-    const ds = deviceSettings || {};
-    const day   = (ds.day_brightness   > 0.01) ? ds.day_brightness   : 1.0;
-    const night = (ds.night_brightness > 0.01) ? ds.night_brightness : 0.5;
-    try {
-      await sendJSON({ day_brightness: day, night_brightness: night, update_image: true });
-      await sendJSON({ algo_disable: false });
-      log(`Lamp woken up: brightness day ${day} / night ${night}, moon tracking on.`);
-    } catch (e) { log(`Could not restore settings: ${e.message}`); }
-    if (hadWifi) log('NOTE: WiFi credentials were cleared for the update - '
-                   + 'enter them again in the MOON app to restore time sync.');
+    await wakeLamp();
+    if (wifiWasCleared) log('NOTE: WiFi credentials were cleared for the update - '
+                          + 'enter them again in the MOON app to restore time sync.');
     uploadLog('success');
+    hideAllPrompts();
     document.getElementById('successPrompt').style.display = '';
     setConnStatus(`Updated to ${verified}`, 'connected');
-  } else if (verified) {
-    log(`NOT UPDATED: the lamp still reports ${verified}, not ${FW_FULL_VERSION}.`);
+    return true;
+  }
+  if (verified) {
+    log(`NOT UPDATED: the lamp reports ${verified}, not ${FW_FULL_VERSION}.`);
     log('The transfer arrived but the lamp did not activate it. Nothing was damaged. Please try again.');
     uploadLog('transfer-ok-but-not-applied');
     setConnStatus(`Still on ${verified} — not updated`, 'error');
-  } else {
-    log('Could not read the version back, so the update is UNCONFIRMED. '
-      + 'Reconnect and check the firmware version before assuming it worked.');
-    uploadLog('unconfirmed');
-    setConnStatus('Unconfirmed — please reconnect and check', 'error');
+    return false;
   }
-  rxChar = null;
+  log('Connected, but the lamp did not answer with its version.');
+  uploadLog('unconfirmed');
+  return false;
+}
+
+// Undo anything that would leave a rescued lamp dark. Brightness is restored to
+// what it had before, unless that was already zero (a previous rescue attempt
+// prepped it and never put it back), in which case sane defaults.
+async function wakeLamp() {
+  const ds = deviceSettings || {};
+  const day   = (ds.day_brightness   > 0.01) ? ds.day_brightness   : 1.0;
+  const night = (ds.night_brightness > 0.01) ? ds.night_brightness : 0.5;
+  try {
+    await sendJSON({ day_brightness: day, night_brightness: night, update_image: true });
+    await sendJSON({ algo_disable: false });
+    log(`Lamp woken up: brightness day ${day} / night ${night}, moon tracking on.`);
+    return true;
+  } catch (e) { log(`Could not restore settings: ${e.message}`); return false; }
+}
+
+// The one thing the page cannot do on its own: open a scan. requestDevice()
+// needs a user gesture, so after a restart the customer taps once and we finish
+// the job - confirm the version and switch the light back on.
+async function finishUpdate() {
+  const btn = document.getElementById('btnFinish');
+  try {
+    btn.disabled = true;
+    log('Opening the device chooser again so the browser can find the lamp...');
+    chooserOpenedAt = performance.now();
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'MOON' }],
+      optionalServices: [NUS_SERVICE],
+    });
+    log(`Selected: ${device.name}`);
+    attachDisconnectHandler(device);
+    setConnStatus(`Connecting to ${device.name}...`, 'pending');
+    server = await device.gatt.connect();
+    await acquireNUS();
+    setConnStatus(`Connected: ${device.name}`, 'connected');
+    if (!(await verifyAndWake())) {
+      document.getElementById('finishPrompt').style.display = '';
+    }
+  } catch (err) {
+    log(`Reconnect failed: ${err.message}`);
+    uploadLog('finish-failed');
+    document.getElementById('finishPrompt').style.display = '';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ============================================================
