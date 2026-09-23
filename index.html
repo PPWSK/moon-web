@@ -294,6 +294,14 @@ function detectPlatform() {
     uploadLog('unsupported-browser');
   }
 
+  const isChromeProper = /Chrome\//.test(ua)
+    && !/Edg\/|OPR\/|SamsungBrowser\/|YaBrowser\/|Brave\//.test(ua);
+  if (hasWebBluetooth && !isChromeProper) {
+    const brand = (/(Edg|OPR|SamsungBrowser|YaBrowser|Brave)\/[\d.]+/.exec(ua) || ['another browser'])[0];
+    log(`Browser is ${brand}, not Google Chrome. It may work, but every update we `
+      + `have completed was done in Chrome - switch if anything misbehaves.`);
+  }
+
   if (isIOS) {
     showPlatformWarning(
       'Not Available on iOS',
@@ -636,7 +644,22 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 //  BLE connection
 // ============================================================
 
+// Tapping Connect while the chooser is already open CANCELS the open one:
+// requestDevice() rejects the pending call with "User cancelled the
+// requestDevice() chooser". A customer tapping impatiently therefore kills the
+// scan he is waiting on, over and over, and never sees his lamp. (23 Sep: ~20
+// attempts on an Android phone, every one of them self-cancelled at 0 s.)
+let connectBusy = false;
+
 async function doConnect() {
+  if (connectBusy) {
+    log('Already searching — leave the list open, it can take 30 seconds for a '
+      + 'lamp to appear.');
+    return;
+  }
+  connectBusy = true;
+  const connectBtn = document.getElementById('btnConnect');
+  connectBtn.disabled = true;
   try {
     hideAllPrompts();
     log('Requesting BLE device...');
@@ -663,9 +686,46 @@ async function doConnect() {
 
     attachDisconnectHandler(device);
 
-    server = await device.gatt.connect();
-    log('GATT connected');
-    await acquireNUS();
+    // Connect and discover with retries, timing every attempt.
+    //
+    // A healthy lamp answers service discovery in well under a second. A lamp
+    // whose firmware is wedged still ADVERTISES and still ACCEPTS the link -
+    // that part is the BLE controller - but never answers, and then the ESP32
+    // task watchdog (10 s, panic) resets it. So "GATT connected, then the link
+    // dies at ~10 s with no services" is a crashing controller, not Bluetooth,
+    // and no amount of retrying on the phone will change it. Measure it and
+    // say so.
+    let connErr = null, wdtPattern = 0;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      let tConn = performance.now();
+      try {
+        setConnStatus(`Connecting to ${device.name}...` + (attempt > 1 ? ` (try ${attempt})` : ''), 'pending');
+        server = await device.gatt.connect();
+        tConn = performance.now();
+        log(`GATT connected${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
+        await acquireNUS();
+        log(`Services discovered in ${((performance.now() - tConn) / 1000).toFixed(1)}s`);
+        connErr = null;
+        break;
+      } catch (e) {
+        const dt = (performance.now() - tConn) / 1000;
+        connErr = e;
+        log(`Attempt ${attempt} failed ${dt.toFixed(1)}s after connecting: ${e.message}`);
+        if (dt >= 7 && dt <= 13) wdtPattern++;
+        try { device.gatt.disconnect(); } catch (e2) {}
+        if (attempt < 3) await sleep(2500);
+      }
+    }
+    if (connErr) {
+      if (wdtPattern >= 2) {
+        log('DIAGNOSIS: the lamp accepted the connection but never answered, and '
+          + 'reset itself about 10 seconds later - twice. That is the controller '
+          + 'crashing (its internal watchdog), not a Bluetooth or phone problem. '
+          + 'It cannot be updated over the air in this state.');
+        uploadLog('lamp-resets-on-connect');
+      }
+      throw connErr;
+    }
 
     deviceVersion = null;
     alreadyUpToDate = false;
@@ -756,6 +816,9 @@ async function doConnect() {
     } else {
       setConnStatus(`Error: ${msg}`, 'error');
     }
+  } finally {
+    connectBusy = false;
+    document.getElementById('btnConnect').disabled = false;
   }
 }
 
@@ -1703,8 +1766,10 @@ async function wakeLamp() {
 // needs a user gesture, so after a restart the customer taps once and we finish
 // the job - confirm the version and switch the light back on.
 async function finishUpdate() {
+  if (connectBusy) { log('Already searching — leave the list open.'); return; }
   const btn = document.getElementById('btnFinish');
   try {
+    connectBusy = true;
     btn.disabled = true;
     log('Opening the device chooser again so the browser can find the lamp...');
     chooserOpenedAt = performance.now();
@@ -1726,6 +1791,7 @@ async function finishUpdate() {
     uploadLog('finish-failed');
     document.getElementById('finishPrompt').style.display = '';
   } finally {
+    connectBusy = false;
     btn.disabled = false;
   }
 }
