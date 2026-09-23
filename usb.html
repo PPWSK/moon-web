@@ -159,19 +159,8 @@ a.plain { color:#004AFF; text-decoration:none; }
   </div>
 </div>
 
-<div class="card" id="modelCard">
-  <h2>Which MOON is this?</h2>
-  <button class="btn-primary" onclick="chooseModel('S90')">MOON Ninety</button>
-  <button onclick="chooseModel('S70')">MOON Seventy</button>
-</div>
-
-<div class="card" id="versionCard" style="display:none">
-  <h2>Which firmware?</h2>
-  <div id="versionChoices"></div>
-</div>
-
 <div class="card" id="flowCard" style="display:none">
-  <h2>Install</h2>
+  <h2>Restore firmware 4.8.7</h2>
   <div id="chosen" class="note"></div>
   <ol class="steps">
     <li>Plug a USB-C cable from the controller into this computer</li>
@@ -213,7 +202,7 @@ a.plain { color:#004AFF; text-decoration:none; }
 </div>
 
 <script type="module">
-import { ESPLoader, Transport } from './vendor/esptool.js';
+import { ESPLoader, Transport } from './vendor/esptool-js/index.js';
 import md5 from './vendor/js-md5.js';
 
 // The four images and the offsets they go to. These are exactly what
@@ -227,26 +216,12 @@ const PARTS = [
   { file: 'ota_data_initial.bin', address: 0xe000  },
   { file: 'app.bin',              address: 0x30000 },
 ];
-const MODELS = {
-  S90: {
-    label: 'MOON Ninety',
-    builds: [
-      { version: '4.8.7', dir: 'firmware/usb_S90_4.8.7', name: 'Put 4.8.7 back',
-        note: 'The version your MOON ran before it stopped working. Choose this to '
-            + 'return it to exactly how it was.' },
-      { version: '5.1.12', dir: 'firmware/usb_S90_5.1.12', name: 'Install 5.1.12',
-        note: 'The current firmware.' },
-    ],
-  },
-  S70: {
-    label: 'MOON Seventy',
-    builds: [
-      { version: '5.1.12', dir: 'firmware/usb_S70_5.1.12', name: 'Install 5.1.12',
-        note: 'The current firmware.' },
-    ],
-  },
-};
-let BUILD = null;
+// One lamp, one firmware, no choices. The MOON Ninety on the older controller
+// is the only case this page exists for, and 4.8.7 is the firmware it ran
+// before the trouble started - so there is nothing to pick and nothing to get
+// wrong.
+const MODEL = 'S90';
+const BUILD = { version: '4.8.7', dir: 'firmware/usb_S90_4.8.7', label: 'MOON Ninety' };
 const LOG_UPLOAD_URL =
   'https://script.google.com/macros/s/AKfycby4ZxtDyqZWguAhFEbOd8uokQWSVswIPwY0Wl0pz_7vCcMATHe9ABuhd203AEhjybZe/exec';
 
@@ -258,7 +233,7 @@ const LOG_UPLOAD_URL =
 const MOON_USB = [{ usbVendorId: 0x0403, usbProductId: 0x6015 }];
 const isMoonBridge = (i) => i && i.usbVendorId === 0x0403 && i.usbProductId === 0x6015;
 
-let MODEL = null, port = null, transport = null, esploader = null, busy = false;
+let port = null, transport = null, esploader = null, busy = false;
 const LOG_LINES = [];
 
 function log(msg) {
@@ -279,8 +254,8 @@ function logHeader() {
   return [
     'MOON USB recovery log',
     `when      : ${new Date().toISOString()}`,
-    `model     : ${MODEL ? MODELS[MODEL].label + ' (' + MODEL + ')' : '(not chosen)'}`,
-    `payload   : ${BUILD ? 'v' + BUILD.version : '(not chosen)'}`,
+    `model     : ${BUILD.label} (${MODEL})`,
+    `payload   : v${BUILD.version}`,
     `page      : ${location.href}`,
     `browser   : ${n.userAgent}`,
     `platform  : ${n.platform || '?'}  lang=${n.language}`,
@@ -308,7 +283,7 @@ function uploadLog(reason) {
   }
   try { navigator.sendBeacon(LOG_UPLOAD_URL + '?log=' + enc); } catch (e) {}
 }
-window.addEventListener('pagehide', () => { if (MODEL) uploadLog(busy ? 'abandoned' : 'left-page'); });
+window.addEventListener('pagehide', () => uploadLog(busy ? 'abandoned' : 'left-page'));
 window.addEventListener('error', (e) => log(`JS ERROR: ${e.message} @${e.filename}:${e.lineno}`));
 window.addEventListener('unhandledrejection', (e) =>
   log(`UNHANDLED REJECTION: ${e.reason && e.reason.message ? e.reason.message : e.reason}`));
@@ -329,36 +304,7 @@ function progress(pct) {
   t.style.display = ''; t.textContent = pct.toFixed(0) + '%';
 }
 
-window.chooseModel = function (m) {
-  MODEL = m;
-  document.getElementById('modelCard').style.display = 'none';
-  const card = document.getElementById('versionCard');
-  const box = document.getElementById('versionChoices');
-  box.innerHTML = '';
-  MODELS[m].builds.forEach((b, i) => {
-    const btn = document.createElement('button');
-    btn.className = i === 0 ? 'btn-primary' : '';
-    btn.textContent = b.name;
-    btn.onclick = () => chooseBuild(i);
-    const note = document.createElement('div');
-    note.className = 'note';
-    note.style.marginTop = '-4px';
-    note.textContent = b.note;
-    box.appendChild(btn);
-    box.appendChild(note);
-  });
-  card.style.display = '';
-  log(`Model: ${MODELS[m].label} (${m})`);
-};
 
-window.chooseBuild = function (i) {
-  BUILD = MODELS[MODEL].builds[i];
-  document.getElementById('versionCard').style.display = 'none';
-  document.getElementById('flowCard').style.display = '';
-  document.getElementById('chosen').innerHTML =
-    `<span class="chip">${MODELS[MODEL].label}</span> &nbsp; firmware <strong>v${BUILD.version}</strong>`;
-  log(`Payload: v${BUILD.version} (${BUILD.dir})`);
-};
 window.toggleLog = function () {
   const w = document.getElementById('logWrap');
   const open = w.style.display !== 'none';
@@ -407,7 +353,7 @@ async function fetchPart(dir, file) {
 }
 
 window.doFlash = async function () {
-  if (busy || !port || !BUILD) return;
+  if (busy || !port) return;
   busy = true;
   document.getElementById('btnFlash').disabled = true;
   document.getElementById('btnPort').disabled = true;
@@ -489,6 +435,10 @@ if (!navigator.serial) {
   uploadLog('unsupported-browser');
 } else {
   log('Page ready. Web Serial available.');
+  document.getElementById('chosen').innerHTML =
+    `<span class="chip">${BUILD.label}</span> &nbsp; firmware <strong>v${BUILD.version}</strong>`;
+  document.getElementById('flowCard').style.display = '';
+  log(`Payload: v${BUILD.version} (${BUILD.dir})`);
   // A port the customer already approved on an earlier visit comes back
   // through getPorts() with no chooser at all - one less thing to get wrong.
   navigator.serial.getPorts().then((ps) => {
