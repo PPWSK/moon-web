@@ -165,6 +165,11 @@ a.plain { color:#004AFF; text-decoration:none; }
   <button onclick="chooseModel('S70')">MOON Seventy</button>
 </div>
 
+<div class="card" id="versionCard" style="display:none">
+  <h2>Which firmware?</h2>
+  <div id="versionChoices"></div>
+</div>
+
 <div class="card" id="flowCard" style="display:none">
   <h2>Install</h2>
   <div id="chosen" class="note"></div>
@@ -222,11 +227,26 @@ const PARTS = [
   { file: 'ota_data_initial.bin', address: 0xe000  },
   { file: 'app.bin',              address: 0x30000 },
 ];
-const VERSION = '5.1.12';
 const MODELS = {
-  S90: { label: 'MOON Ninety', dir: 'firmware/usb_S90_5.1.12' },
-  S70: { label: 'MOON Seventy', dir: 'firmware/usb_S70_5.1.12' },
+  S90: {
+    label: 'MOON Ninety',
+    builds: [
+      { version: '4.8.7', dir: 'firmware/usb_S90_4.8.7', name: 'Put 4.8.7 back',
+        note: 'The version your MOON ran before it stopped working. Choose this to '
+            + 'return it to exactly how it was.' },
+      { version: '5.1.12', dir: 'firmware/usb_S90_5.1.12', name: 'Install 5.1.12',
+        note: 'The current firmware.' },
+    ],
+  },
+  S70: {
+    label: 'MOON Seventy',
+    builds: [
+      { version: '5.1.12', dir: 'firmware/usb_S70_5.1.12', name: 'Install 5.1.12',
+        note: 'The current firmware.' },
+    ],
+  },
 };
+let BUILD = null;
 const LOG_UPLOAD_URL =
   'https://script.google.com/macros/s/AKfycby4ZxtDyqZWguAhFEbOd8uokQWSVswIPwY0Wl0pz_7vCcMATHe9ABuhd203AEhjybZe/exec';
 
@@ -260,7 +280,7 @@ function logHeader() {
     'MOON USB recovery log',
     `when      : ${new Date().toISOString()}`,
     `model     : ${MODEL ? MODELS[MODEL].label + ' (' + MODEL + ')' : '(not chosen)'}`,
-    `payload   : v${VERSION}`,
+    `payload   : ${BUILD ? 'v' + BUILD.version : '(not chosen)'}`,
     `page      : ${location.href}`,
     `browser   : ${n.userAgent}`,
     `platform  : ${n.platform || '?'}  lang=${n.language}`,
@@ -312,10 +332,32 @@ function progress(pct) {
 window.chooseModel = function (m) {
   MODEL = m;
   document.getElementById('modelCard').style.display = 'none';
+  const card = document.getElementById('versionCard');
+  const box = document.getElementById('versionChoices');
+  box.innerHTML = '';
+  MODELS[m].builds.forEach((b, i) => {
+    const btn = document.createElement('button');
+    btn.className = i === 0 ? 'btn-primary' : '';
+    btn.textContent = b.name;
+    btn.onclick = () => chooseBuild(i);
+    const note = document.createElement('div');
+    note.className = 'note';
+    note.style.marginTop = '-4px';
+    note.textContent = b.note;
+    box.appendChild(btn);
+    box.appendChild(note);
+  });
+  card.style.display = '';
+  log(`Model: ${MODELS[m].label} (${m})`);
+};
+
+window.chooseBuild = function (i) {
+  BUILD = MODELS[MODEL].builds[i];
+  document.getElementById('versionCard').style.display = 'none';
   document.getElementById('flowCard').style.display = '';
   document.getElementById('chosen').innerHTML =
-    `<span class="chip">${MODELS[m].label}</span> &nbsp; firmware <strong>v${VERSION}</strong>`;
-  log(`Model: ${MODELS[m].label} (${m}), payload v${VERSION}`);
+    `<span class="chip">${MODELS[MODEL].label}</span> &nbsp; firmware <strong>v${BUILD.version}</strong>`;
+  log(`Payload: v${BUILD.version} (${BUILD.dir})`);
 };
 window.toggleLog = function () {
   const w = document.getElementById('logWrap');
@@ -365,14 +407,14 @@ async function fetchPart(dir, file) {
 }
 
 window.doFlash = async function () {
-  if (busy || !port) return;
+  if (busy || !port || !BUILD) return;
   busy = true;
   document.getElementById('btnFlash').disabled = true;
   document.getElementById('btnPort').disabled = true;
   document.getElementById('doneNote').style.display = 'none';
   try {
     phase('Loading firmware...');
-    const dir = MODELS[MODEL].dir;
+    const dir = BUILD.dir;
     const files = [];
     for (const p of PARTS) {
       const data = await fetchPart(dir, p.file);
@@ -419,10 +461,10 @@ window.doFlash = async function () {
 
     phase('Restarting the MOON...');
     await esploader.after();          // hard reset out of the bootloader
-    log('Controller reset. It is now running v' + VERSION + '.');
+    log('Controller reset. It is now running v' + BUILD.version + '.');
     phase(null);
     document.getElementById('doneNote').style.display = '';
-    setStatus(`Updated to v${VERSION}`, 'ok');
+    setStatus(`Updated to v${BUILD.version}`, 'ok');
     uploadLog('success');
   } catch (err) {
     log(`FAILED: ${err && err.message ? err.message : err}`);
