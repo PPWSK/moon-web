@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MOON — USB Recovery</title>
+<style>
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: Helvetica, Arial, sans-serif;
+  background: #ffffff; color: #030303;
+  padding: 2rem 1rem; max-width: 520px; margin: 0 auto;
+  line-height: 1.6;
+}
+h1 { font-size: 1.5rem; font-weight: 400; margin-bottom: 0.25rem; color: #030303; letter-spacing: 0.02em; }
+.subtitle { font-size: 0.8rem; color: #9D9D9D; margin-bottom: 2rem; letter-spacing: 0.01em; }
+.card {
+  border-top: 1px solid #e0e0e0; padding: 1.25rem 0; margin-bottom: 0;
+}
+.card:last-child { border-bottom: 1px solid #e0e0e0; }
+.card h2 {
+  font-size: 0.7rem; color: #9D9D9D; margin-bottom: 0.75rem;
+  text-transform: uppercase; letter-spacing: 0.1em; font-weight: 400;
+}
+button {
+  width: 100%; padding: 12px 2rem; border: 1px solid #030303;
+  background: transparent; color: #030303;
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 0.875rem; font-weight: 400; cursor: pointer; margin-bottom: 8px;
+  transition: border-color 0.2s, color 0.2s;
+  letter-spacing: 0.01em;
+}
+button:disabled { opacity: 0.3; cursor: not-allowed; }
+button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
+.btn-red { border-color: #8a1b1b; color: #8a1b1b; }
+.btn-red:not(:disabled):hover { border-color: #030303; color: #030303; }
+.btn-primary { border-color: #004AFF; color: #ffffff; background: #004AFF; }
+.btn-primary:not(:disabled):hover { background: #0038cc; border-color: #0038cc; color: #ffffff; }
+.btn-done { border-color: #e0e0e0; color: #9D9D9D; background: transparent; }
+.btn-done:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
+.status { font-size: 0.8rem; color: #9D9D9D; margin-top: 6px; word-break: break-all; }
+
+.progress-bar {
+  width: 100%; height: 3px; background: #e0e0e0;
+  overflow: hidden; margin: 12px 0;
+}
+.progress-fill {
+  height: 100%; background: #004AFF;
+  transition: width 0.3s; display: flex; align-items: center;
+  justify-content: center; font-size: 0; min-width: 0;
+}
+.progress-text { font-size: 0.8rem; color: #9D9D9D; margin-bottom: 8px; }
+
+.log {
+  background: #F8F8F8; padding: 12px;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 0.65rem; max-height: 200px; overflow-y: auto;
+  color: #555; margin-top: 8px; white-space: pre-wrap;
+  border: 1px solid #e0e0e0;
+}
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 12px; background: #e0e0e0; }
+.stat { background: #ffffff; padding: 10px; text-align: center; }
+.stat .val { font-size: 1.25rem; font-weight: 400; color: #030303; }
+.stat .lbl { font-size: 0.65rem; color: #9D9D9D; text-transform: uppercase; letter-spacing: 0.08em; }
+.phase-display { font-size: 1.5rem; font-weight: 400; text-align: center; padding: 12px; letter-spacing: 0.02em; }
+.phase-probe { color: #9D9D9D; }
+.phase-count { color: #004AFF; }
+.phase-go { color: #030303; }
+.stage-label {
+  font-size: 0.65rem; font-weight: 400; text-transform: uppercase;
+  letter-spacing: 0.1em; padding: 4px 10px;
+  display: inline-block; margin-bottom: 6px; border: 1px solid;
+}
+.stage-1 { border-color: #9D9D9D; color: #9D9D9D; }
+.stage-2 { border-color: #030303; color: #030303; }
+
+/* Platform warning */
+.platform-warning {
+  border: 1px solid #e0e0e0; padding: 2rem 1.5rem; margin-bottom: 1.5rem; text-align: center;
+}
+.platform-warning h2 { color: #030303; font-size: 1rem; font-weight: 400; margin-bottom: 0.75rem; text-transform: none; letter-spacing: 0.02em; }
+.platform-warning p { font-size: 0.85rem; color: #555; margin: 8px 0; line-height: 1.6; }
+.platform-warning .detail { font-size: 0.75rem; color: #9D9D9D; margin-top: 1rem; line-height: 1.6; }
+.platform-warning a { color: #004AFF; text-decoration: none; }
+.platform-warning a:hover { text-decoration: underline; }
+
+/* Instructions */
+.instructions { font-size: 0.8rem; color: #555; }
+.instructions ol { padding-left: 1.25rem; }
+.instructions li { margin: 0.5rem 0; }
+.instructions .note { font-size: 0.75rem; color: #9D9D9D; font-style: italic; margin-top: 0.75rem; }
+
+/* Firmware status */
+.fw-status { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 0.8rem; color: #555; }
+.fw-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.fw-dot.loading { background: #9D9D9D; }
+.fw-dot.ready { background: #030303; }
+.fw-dot.error { background: #cc0000; }
+@keyframes dot-blink {
+  0%, 100% { background: #004AFF; }
+  50% { background: #9D9D9D; }
+}
+.fw-dot.connecting { animation: dot-blink 1s ease-in-out infinite; }
+
+/* Collapsible */
+.collapse-toggle {
+  background: none; border: none; color: #9D9D9D; font-size: 0.75rem;
+  font-family: Helvetica, Arial, sans-serif;
+  cursor: pointer; padding: 4px 0; width: auto; margin: 0; font-weight: 400;
+  text-align: left; letter-spacing: 0.01em;
+}
+.collapse-toggle:hover { color: #004AFF; }
+
+/* Footer */
+.footer {
+  padding: 2rem 0 1rem; text-align: center;
+  font-size: 0.7rem; color: #9D9D9D; letter-spacing: 0.01em;
+}
+.footer a { color: #9D9D9D; text-decoration: none; }
+.footer a:hover { color: #004AFF; }
+
+.note { border:1px solid #e0e0e0; padding:1rem; margin-bottom:12px; font-size:0.75rem; color:#555; line-height:1.55; }
+.note strong { color:#030303; font-weight:400; }
+.steps { font-size:0.8rem; color:#555; line-height:1.9; padding-left:1.2rem; margin:0 0 0.5rem; }
+.chip { display:inline-block; border:1px solid #e0e0e0; padding:2px 8px; font-size:0.65rem;
+        color:#9D9D9D; letter-spacing:0.08em; text-transform:uppercase; }
+a.plain { color:#004AFF; text-decoration:none; }
+</style>
+</head>
+<body>
+
+<h1>MOON &mdash; USB Recovery</h1>
+<div class="subtitle">Reflash a MOON controller over its USB-C port, when Bluetooth cannot reach it</div>
+
+<div id="noSerialWarning" class="platform-warning" style="display:none">
+  <h2>This browser cannot talk to USB devices</h2>
+  <p>USB recovery needs the Web Serial API.</p>
+  <div class="detail">Use <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on a
+    <strong>computer</strong> (Windows, macOS, Linux or ChromeOS). Phones and tablets cannot do this —
+    Web Serial is desktop only.</div>
+</div>
+
+<div id="mainContent">
+
+<div class="card">
+  <h2>When to use this</h2>
+  <div class="note">
+    Use this when the lamp <strong>cannot be reached over Bluetooth at all</strong> — it does not appear,
+    or it connects and drops again after a few seconds. This route does not use the MOON's own software,
+    so it still works when that software is crashing. It writes a complete, fresh firmware.
+    <br><br>
+    If Bluetooth still works, use the <a class="plain" href="./">wireless update</a> instead — it needs no cable.
+  </div>
+  <div class="note">
+    <strong>What you need:</strong> the controller's <strong>USB-C</strong> port, a USB-C cable to your computer,
+    and the lamp powered on as usual. Nothing needs to be opened beyond reaching the controller box,
+    and there are no buttons to hold — the board resets itself.
+  </div>
+</div>
+
+<div class="card" id="modelCard">
+  <h2>Which MOON is this?</h2>
+  <button class="btn-primary" onclick="chooseModel('S90')">MOON Ninety</button>
+  <button onclick="chooseModel('S70')">MOON Seventy</button>
+</div>
+
+<div class="card" id="flowCard" style="display:none">
+  <h2>Install</h2>
+  <div id="chosen" class="note"></div>
+  <ol class="steps">
+    <li>Plug a USB-C cable from the controller into this computer</li>
+    <li>Press <strong>Choose USB port</strong> and pick the entry that appears (often "FT231X" or "USB Serial")</li>
+    <li>Press <strong>Install firmware</strong> and leave it alone for about a minute</li>
+  </ol>
+  <button id="btnPort" class="btn-primary" onclick="choosePort()">Choose USB port</button>
+  <div id="portStatus" class="fw-status">
+    <span class="fw-dot" id="portDot" style="background:#9D9D9D"></span>
+    <span id="portText">No port selected</span>
+  </div>
+  <button id="btnFlash" class="btn-primary" onclick="doFlash()" disabled>Install firmware</button>
+  <div id="phaseDisplay" class="phase-display" style="display:none"></div>
+  <div id="progressText" class="progress-text" style="display:none">0%</div>
+  <div class="progress-bar"><div id="progressFill" class="progress-fill" style="width:0%"></div></div>
+  <div id="doneNote" style="display:none">
+    <div class="note" style="border-color:#004AFF">
+      <strong style="color:#004AFF">Done.</strong> The MOON restarted on the new firmware. You can unplug the
+      USB cable. Open the MOON app to set your location and Wi-Fi again if they were lost.
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <button class="collapse-toggle" onclick="toggleLog()" id="logToggle">&rsaquo; Log</button>
+  <div id="logWrap" style="display:none">
+    <pre id="log" class="log"></pre>
+    <button style="width:auto;padding:4px 12px;font-size:0.65rem;margin-top:6px;border:1px solid #e0e0e0;background:transparent;color:#9D9D9D" onclick="copyLog()">Copy</button>
+  </div>
+</div>
+
+</div>
+
+<div class="footer">
+  <a href="https://www.adu-studios.com">A.D.U. Studios</a>
+  <br>USB recovery needs Chrome or Edge on a computer
+  <br>Questions? <a href="mailto:info@adu-studios.com">info@adu-studios.com</a>
+</div>
+
+<script type="module">
+import { ESPLoader, Transport } from './vendor/esptool.js';
+import md5 from './vendor/js-md5.js';
+
+// The four images and the offsets they go to. These are exactly what
+// `idf.py build` prints and what our own esptool command line uses:
+//   0x1000 bootloader, 0x8000 partition table, 0xe000 ota_data, 0x30000 app.
+// ota_data_initial is what makes the freshly written app at 0x30000 the one
+// that boots; without it the chip would keep whatever slot it booted last.
+const PARTS = [
+  { file: 'bootloader.bin',       address: 0x1000  },
+  { file: 'partition-table.bin',  address: 0x8000  },
+  { file: 'ota_data_initial.bin', address: 0xe000  },
+  { file: 'app.bin',              address: 0x30000 },
+];
+const VERSION = '5.1.12';
+const MODELS = {
+  S90: { label: 'MOON Ninety', dir: 'firmware/usb_S90_5.1.12' },
+  S70: { label: 'MOON Seventy', dir: 'firmware/usb_S70_5.1.12' },
+};
+const LOG_UPLOAD_URL =
+  'https://script.google.com/macros/s/AKfycby4ZxtDyqZWguAhFEbOd8uokQWSVswIPwY0Wl0pz_7vCcMATHe9ABuhd203AEhjybZe/exec';
+
+let MODEL = null, port = null, transport = null, esploader = null, busy = false;
+const LOG_LINES = [];
+
+function log(msg) {
+  const now = new Date();
+  LOG_LINES.push(`[${now.toISOString()}] ${msg}`);
+  const el = document.getElementById('log');
+  if (el) { el.textContent += `[${now.toLocaleTimeString()}] ${msg}\n`; el.scrollTop = el.scrollHeight; }
+}
+// esptool-js writes its own progress chatter here; keep it in the same log.
+const terminal = {
+  clean() {},
+  writeLine(d) { log(String(d).replace(/\s+$/, '')); },
+  write(d) { const s = String(d).trim(); if (s) log(s); },
+};
+
+function logHeader() {
+  const n = navigator;
+  return [
+    'MOON USB recovery log',
+    `when      : ${new Date().toISOString()}`,
+    `model     : ${MODEL ? MODELS[MODEL].label + ' (' + MODEL + ')' : '(not chosen)'}`,
+    `payload   : v${VERSION}`,
+    `page      : ${location.href}`,
+    `browser   : ${n.userAgent}`,
+    `platform  : ${n.platform || '?'}  lang=${n.language}`,
+    `serial    : ${n.serial ? 'present' : 'ABSENT'}`,
+    '-'.repeat(60),
+  ].join('\n');
+}
+// Same rescue-log sheet as the Bluetooth page: a POST to Apps Script answers
+// with a 302 and the browser drops the body, so the transcript goes in the
+// query string, delivered by sendBeacon so it survives the tab closing.
+let lastUploaded = 0;
+function uploadLog(reason) {
+  if (LOG_LINES.length <= lastUploaded) return;
+  lastUploaded = LOG_LINES.length;
+  let text = `reason=usb-${reason}\n` + logHeader() + '\n' + LOG_LINES.join('\n') + '\n';
+  let enc = encodeURIComponent(text);
+  if (enc.length > 7000) {
+    let keep = 120;
+    do {
+      text = `reason=usb-${reason}\n` + logHeader() + '\n...earlier lines trimmed...\n'
+           + LOG_LINES.slice(-keep).join('\n') + '\n';
+      enc = encodeURIComponent(text);
+      keep = Math.floor(keep * 0.7);
+    } while (enc.length > 7000 && keep > 5);
+  }
+  try { navigator.sendBeacon(LOG_UPLOAD_URL + '?log=' + enc); } catch (e) {}
+}
+window.addEventListener('pagehide', () => { if (MODEL) uploadLog(busy ? 'abandoned' : 'left-page'); });
+window.addEventListener('error', (e) => log(`JS ERROR: ${e.message} @${e.filename}:${e.lineno}`));
+window.addEventListener('unhandledrejection', (e) =>
+  log(`UNHANDLED REJECTION: ${e.reason && e.reason.message ? e.reason.message : e.reason}`));
+
+function setStatus(text, state) {
+  document.getElementById('portText').textContent = text;
+  const dot = document.getElementById('portDot');
+  dot.style.background = state === 'ok' ? '#004AFF' : state === 'error' ? '#C00' : '#9D9D9D';
+}
+function phase(t) {
+  const el = document.getElementById('phaseDisplay');
+  if (!t) { el.style.display = 'none'; return; }
+  el.style.display = ''; el.textContent = t;
+}
+function progress(pct) {
+  document.getElementById('progressFill').style.width = pct + '%';
+  const t = document.getElementById('progressText');
+  t.style.display = ''; t.textContent = pct.toFixed(0) + '%';
+}
+
+window.chooseModel = function (m) {
+  MODEL = m;
+  document.getElementById('modelCard').style.display = 'none';
+  document.getElementById('flowCard').style.display = '';
+  document.getElementById('chosen').innerHTML =
+    `<span class="chip">${MODELS[m].label}</span> &nbsp; firmware <strong>v${VERSION}</strong>`;
+  log(`Model: ${MODELS[m].label} (${m}), payload v${VERSION}`);
+};
+window.toggleLog = function () {
+  const w = document.getElementById('logWrap');
+  const open = w.style.display !== 'none';
+  w.style.display = open ? 'none' : '';
+  document.getElementById('logToggle').innerHTML = (open ? '&rsaquo;' : '&and;') + ' Log';
+};
+window.copyLog = function () {
+  navigator.clipboard.writeText(logHeader() + '\n' + LOG_LINES.join('\n')).catch(() => {});
+};
+
+window.choosePort = async function () {
+  if (busy) return;
+  try {
+    log('Opening the USB port chooser...');
+    port = await navigator.serial.requestPort();
+    const info = port.getInfo ? port.getInfo() : {};
+    log(`Port selected (USB vendor 0x${(info.usbVendorId || 0).toString(16)}, `
+      + `product 0x${(info.usbProductId || 0).toString(16)}).`);
+    setStatus('USB port selected', 'ok');
+    document.getElementById('btnFlash').disabled = false;
+  } catch (err) {
+    log(`No port selected: ${err.message}`);
+    setStatus('No port selected', 'error');
+    uploadLog('no-port');
+  }
+};
+
+async function fetchPart(dir, file) {
+  const r = await fetch(`${dir}/${file}`, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`${file}: HTTP ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
+
+window.doFlash = async function () {
+  if (busy || !port) return;
+  busy = true;
+  document.getElementById('btnFlash').disabled = true;
+  document.getElementById('btnPort').disabled = true;
+  document.getElementById('doneNote').style.display = 'none';
+  try {
+    phase('Loading firmware...');
+    const dir = MODELS[MODEL].dir;
+    const files = [];
+    for (const p of PARTS) {
+      const data = await fetchPart(dir, p.file);
+      log(`${p.file}: ${data.length} bytes -> 0x${p.address.toString(16)}`);
+      files.push({ data, address: p.address });
+    }
+
+    phase('Connecting to the controller...');
+    // esptool drives DTR/RTS, which on this board are wired through Q1/Q2 to
+    // EN and IO0 - that is what puts the ESP32 into its ROM bootloader with no
+    // buttons to hold. The ROM loader is in silicon, so it works no matter how
+    // badly the installed firmware is misbehaving.
+    transport = new Transport(port, false);
+    esploader = new ESPLoader({ transport, baudrate: 460800, romBaudrate: 115200, terminal });
+    const chip = await esploader.main();
+    log(`Connected. Chip: ${chip}`);
+    if (!/esp32/i.test(String(chip)) || /esp32-?(s2|s3|c3|c6|h2)/i.test(String(chip))) {
+      throw new Error(`This is a ${chip}, not the ESP32 a MOON controller uses. Stopping.`);
+    }
+    setStatus(`Connected: ${chip}`, 'ok');
+
+    phase('Writing firmware — do not unplug');
+    const total = files.reduce((a, f) => a + f.data.length, 0);
+    const done = [];
+    await esploader.writeFlash({
+      fileArray: files,
+      flashMode: 'dio',
+      flashFreq: '80m',
+      flashSize: 'detect',
+      eraseAll: false,
+      compress: true,
+      reportProgress: (i, written, size) => {
+        done[i] = written;
+        let sum = 0;
+        for (let k = 0; k < files.length; k++) sum += (k < i ? files[k].data.length : (done[k] || 0));
+        progress(Math.min(100, sum / total * 100));
+      },
+      // Lets esptool compare the chip's own MD5 of what landed in flash
+      // against the file we sent. Without it that verification is skipped.
+      calculateMD5Hash: (image) => md5(image),
+    });
+    progress(100);
+    log('Flash written and verified.');
+
+    phase('Restarting the MOON...');
+    await esploader.after();          // hard reset out of the bootloader
+    log('Controller reset. It is now running v' + VERSION + '.');
+    phase(null);
+    document.getElementById('doneNote').style.display = '';
+    setStatus(`Updated to v${VERSION}`, 'ok');
+    uploadLog('success');
+  } catch (err) {
+    log(`FAILED: ${err && err.message ? err.message : err}`);
+    phase(null);
+    setStatus('Update failed', 'error');
+    log('Nothing is lost: unplug the USB cable, power the lamp off and on, and try again. '
+      + 'If it keeps failing, send this log to info@adu-studios.com.');
+    uploadLog('failed');
+  } finally {
+    try { if (transport) await transport.disconnect(); } catch (e) {}
+    transport = null; esploader = null;
+    busy = false;
+    document.getElementById('btnPort').disabled = false;
+    document.getElementById('btnFlash').disabled = false;
+  }
+};
+
+if (!navigator.serial) {
+  document.getElementById('noSerialWarning').style.display = '';
+  document.getElementById('mainContent').style.display = 'none';
+  log('Web Serial is not available in this browser.');
+  uploadLog('unsupported-browser');
+} else {
+  log('Page ready. Web Serial available.');
+}
+</script>
+</body>
+</html>
