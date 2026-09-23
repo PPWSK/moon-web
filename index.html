@@ -286,6 +286,14 @@ function detectPlatform() {
   const isMacOS = /Macintosh|MacIntel/.test(ua) && !isIOS;
   const hasWebBluetooth = !!navigator.bluetooth;
 
+  // A customer who opens this on the wrong device is a silent failure we would
+  // otherwise never hear about - they just report "the page does nothing".
+  if (isIOS || !hasWebBluetooth) {
+    log(`Web Bluetooth unavailable on this device (iOS=${isIOS}, `
+      + `bluetooth=${hasWebBluetooth ? 'present' : 'absent'}). Nothing can be done from here.`);
+    uploadLog('unsupported-browser');
+  }
+
   if (isIOS) {
     showPlatformWarning(
       'Not Available on iOS',
