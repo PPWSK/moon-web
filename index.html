@@ -267,7 +267,7 @@ button:not(:disabled):hover { border-color: #004AFF; color: #004AFF; }
 
 <div class="footer">
   <a href="https://www.adu-studios.com">A.D.U. Studios</a>
-  <br>Compatible with Android (Chrome), Windows (Chrome/Edge), Linux (Chrome), ChromeOS
+  <br>Compatible with Android (Chrome), macOS (Chrome), Windows (Chrome/Edge), Linux (Chrome), ChromeOS
   <br>Questions? <a href="mailto:info@adu-studios.com">info@adu-studios.com</a>
 </div>
 
@@ -303,15 +303,15 @@ function detectPlatform() {
     return false;
   }
 
-  // macOS warning disabled for testing — re-enable before public release
-  // if (isMacOS) {
-  //   showPlatformWarning(
-  //     'Not Available on macOS',
-  //     'This update requires a Bluetooth feature that macOS does not support. This is a platform limitation that affects all macOS software.',
-  //     'Please use an <strong>Android phone</strong>, a <strong>Windows PC</strong>, or a <strong>Linux PC</strong> with Chrome. If you need help, reach out to <a href="mailto:info@adu-studios.com">info@adu-studios.com</a>.'
-  //   );
-  //   return false;
-  // }
+  // There used to be a "Not Available on macOS" block here, from the S18 era.
+  // It is wrong: on 23 Sep 2026 a MOON Ninety was taken from 5.0.3 to 4.8.7
+  // entirely from macOS Chrome 152 - chooser, connect, notifications, 2487
+  // packets with response, finalize, reboot. Do not put it back. The one real
+  // macOS quirk is that Chrome loses a peripheral it has not seen advertise for
+  // a few seconds, so reconnecting to a lamp that just RESTARTED can fail with
+  // "Bluetooth Device is no longer in range" - handled by reconnecting
+  // immediately and, failing that, the "Reconnect and finish" button.
+  void isMacOS;
 
   if (!hasWebBluetooth) {
     document.getElementById('noBleWarning').style.display = '';
