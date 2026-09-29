@@ -164,11 +164,26 @@ a.plain { color:#004AFF; text-decoration:none; }
   <div id="chosen" class="note"></div>
   <ol class="steps">
     <li>Plug a USB-C cable from the controller into this computer</li>
-    <li>Press <strong>Choose USB port</strong> and pick the entry that appears (often "FT231X" or "USB Serial")</li>
+    <li>Press <strong>Choose USB port</strong> and pick the entry that appears (often "USB Serial", "FT231X" or a COM port)</li>
     <li>Press <strong>Install firmware</strong> and leave it alone for about a minute</li>
   </ol>
-  <button id="btnPort" class="btn-primary" onclick="choosePort(false)">Choose USB port</button>
-  <button id="btnAnyPort" style="display:none" onclick="choosePort(true)">Show every serial device</button>
+  <button id="btnPort" class="btn-primary" onclick="choosePort()">Choose USB port</button>
+  <div id="notFound" style="display:none">
+    <div class="note" style="border-color:#C00">
+      <strong>Nothing in the list?</strong> Then the computer does not see the MOON's USB connection yet.
+      This happens before this page can do anything. Check, in this order:
+      <ol class="steps" style="margin-top:6px">
+        <li><strong>The cable.</strong> Many USB-C cables only charge and carry no data. Try another one —
+          for example the cable that came with a phone.</li>
+        <li><strong>The lamp.</strong> Keep it switched on while the cable is plugged in.</li>
+        <li><strong>Windows.</strong> Open <em>Device Manager</em> and plug the cable in. If a device appears under
+          <em>Other devices</em> with a yellow warning sign, Windows is missing the USB driver: install the free
+          <a class="plain" href="https://ftdichip.com/drivers/vcp-drivers/" target="_blank" rel="noopener">FTDI VCP driver</a>,
+          then try again.</li>
+      </ol>
+      Then press <strong>Choose USB port</strong> again.
+    </div>
+  </div>
   <div id="portStatus" class="fw-status">
     <span class="fw-dot" id="portDot" style="background:#9D9D9D"></span>
     <span id="portText">No port selected</span>
@@ -230,8 +245,24 @@ const LOG_UPLOAD_URL =
 // even when the firmware is blank, crashing or missing - which is exactly when
 // this page gets used. Filtering means the customer sees their MOON and
 // nothing else, instead of a list of every serial device on the machine.
-const MOON_USB = [{ usbVendorId: 0x0403, usbProductId: 0x6015 }];
-const isMoonBridge = (i) => i && i.usbVendorId === 0x0403 && i.usbProductId === 0x6015;
+// The chooser is deliberately NOT filtered. It used to show only the FTDI
+// FT231X on our bench controller, but there are several controller revisions
+// in the field and a different USB chip was simply hidden - the customer saw an
+// empty list and no way forward. Filtering bought no safety either: before
+// anything is written, doFlash() connects to the chip's ROM bootloader and
+// refuses unless it is an ESP32. So every serial device is offered, and the one
+// picked is identified in the log.
+const USB_BRIDGES = {
+  '0403:6015': 'FTDI FT231X (our bench controller)',
+  '0403:6001': 'FTDI FT232R',
+  '10c4:ea60': 'Silicon Labs CP210x',
+  '1a86:7523': 'WCH CH340',
+  '1a86:55d4': 'WCH CH9102',
+  '303a:1001': 'ESP32 built-in USB',
+};
+const usbId = (i) => `${((i && i.usbVendorId) || 0).toString(16).padStart(4, '0')}:`
+                   + `${((i && i.usbProductId) || 0).toString(16).padStart(4, '0')}`;
+let chooserOpenedAt = 0;
 
 let port = null, transport = null, esploader = null, busy = false;
 const LOG_LINES = [];
@@ -318,30 +349,28 @@ window.copyLog = function () {
 function adoptPort(p, how) {
   port = p;
   const i = p.getInfo ? p.getInfo() : {};
-  log(`Port ${how} (USB ${(i.usbVendorId || 0).toString(16).padStart(4, '0')}:`
-    + `${(i.usbProductId || 0).toString(16).padStart(4, '0')}`
-    + `${isMoonBridge(i) ? ', FTDI FT231X — a MOON controller' : ' — NOT the FT231X a MOON uses'}).`);
-  if (!isMoonBridge(i)) log('Careful: that does not look like a MOON controller. '
-                          + 'Check you picked the right device before installing.');
+  const id = usbId(i);
+  log(`Port ${how}: USB ${id}` + (USB_BRIDGES[id] ? ` (${USB_BRIDGES[id]})` : ' (not a known USB bridge - '
+    + 'the chip check before writing will confirm it is a MOON controller)'));
+  document.getElementById('notFound').style.display = 'none';
   setStatus('USB port selected', 'ok');
   document.getElementById('btnFlash').disabled = false;
 }
 
-window.choosePort = async function (showEverything) {
+window.choosePort = async function () {
   if (busy) return;
   try {
-    log(showEverything ? 'Opening the chooser with every serial device...'
-                       : 'Opening the USB port chooser...');
-    const p = await navigator.serial.requestPort(showEverything ? {} : { filters: MOON_USB });
+    log('Opening the USB port chooser (all serial devices)...');
+    chooserOpenedAt = performance.now();
+    const p = await navigator.serial.requestPort({});
     adoptPort(p, 'selected');
   } catch (err) {
-    log(`No port selected: ${err.message}`);
+    const secs = ((performance.now() - chooserOpenedAt) / 1000).toFixed(0);
+    // Same wording whether the list was empty or the person closed it: the
+    // browser does not say which. How long it stayed open is the best hint.
+    log(`No port selected after ${secs}s: ${err.message}`);
     setStatus('No port selected', 'error');
-    if (!showEverything) {
-      log('If the list was empty, this controller may use a different USB chip. '
-        + 'Use "Show every serial device" below and pick it by hand.');
-      document.getElementById('btnAnyPort').style.display = '';
-    }
+    document.getElementById('notFound').style.display = '';
     uploadLog('no-port');
   }
 };
@@ -442,8 +471,8 @@ if (!navigator.serial) {
   // A port the customer already approved on an earlier visit comes back
   // through getPorts() with no chooser at all - one less thing to get wrong.
   navigator.serial.getPorts().then((ps) => {
-    const mine = ps.filter((p) => isMoonBridge(p.getInfo ? p.getInfo() : null));
-    if (mine.length === 1 && !port) adoptPort(mine[0], 'remembered from last time');
+    log(`Ports this browser already has permission for: ${ps.length}`);
+    if (ps.length === 1 && !port) adoptPort(ps[0], 'remembered from last time');
   }).catch(() => {});
 }
 </script>
