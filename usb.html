@@ -153,8 +153,10 @@ a.plain { color:#004AFF; text-decoration:none; }
     If Bluetooth still works, use the <a class="plain" href="./">wireless update</a> instead — it needs no cable.
   </div>
   <div class="note">
-    <strong>What you need:</strong> the controller's <strong>USB-C</strong> port, a USB-C cable to your computer,
-    and the lamp powered on as usual. Nothing needs to be opened beyond reaching the controller box,
+    <strong>What you need:</strong> the controller's <strong>USB-C</strong> port, a <strong>USB-A to USB-C</strong>
+    cable to your computer, and the lamp powered on as usual. A USB-C to USB-C cable will <strong>not</strong> work:
+    the controller is not recognised by a computer's USB-C port. If your computer only has USB-C ports, use a
+    small USB-C to USB-A adapter and plug the USB-A cable into that. Nothing needs to be opened beyond reaching the controller box,
     and there are no buttons to hold — the board resets itself.
   </div>
 </div>
@@ -163,7 +165,7 @@ a.plain { color:#004AFF; text-decoration:none; }
   <h2>Restore firmware 4.8.7</h2>
   <div id="chosen" class="note"></div>
   <ol class="steps">
-    <li>Plug a USB-C cable from the controller into this computer</li>
+    <li>Plug a <strong>USB-A to USB-C</strong> cable from the controller into a USB-A port on this computer</li>
     <li>Press <strong>Choose USB port</strong> and pick the entry that appears (often "USB Serial", "FT231X" or a COM port)</li>
     <li>Press <strong>Install firmware</strong> and leave it alone for about a minute</li>
   </ol>
@@ -173,7 +175,10 @@ a.plain { color:#004AFF; text-decoration:none; }
       <strong>Nothing in the list?</strong> Then the computer does not see the MOON's USB connection yet.
       This happens before this page can do anything. Check, in this order:
       <ol class="steps" style="margin-top:6px">
-        <li><strong>The cable.</strong> Many USB-C cables only charge and carry no data. Try another one —
+        <li><strong>The cable type.</strong> It must be <strong>USB-A to USB-C</strong>, plugged into a USB-A port.
+          With a USB-C to USB-C cable the computer does not see the controller at all. Only USB-C ports on your
+          computer? Use a USB-C to USB-A adapter.</li>
+        <li><strong>The cable itself.</strong> Some cables only charge and carry no data. Try another one —
           for example the cable that came with a phone.</li>
         <li><strong>The lamp.</strong> Keep it switched on while the cable is plugged in.</li>
         <li><strong>Windows.</strong> Open <em>Device Manager</em> and plug the cable in. If a device appears under
